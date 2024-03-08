@@ -1,4 +1,4 @@
-all: main.c
-	gcc main.c -o run -lraylib -lm -Werror -Wall -std=c11 -pedantic
+all: main.cpp
+	g++ main.cpp -o run -lraylib -lm -Werror -Wall -pedantic
 clean:
 	rm run

@@ -1,16 +1,24 @@
+#include <cmath>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <fstream>
 #include <raylib.h>
+#include <filesystem>
+
+// allowing access to read files directly for parsing/storage
+namespace fs = std::filesystem;
 
 // current user playlist
 std::vector<std::string> songQueue;
 // containing all file paths of user playlists
 std::vector<std::string> playlists;
-// the ith song in the song queue 
 // base sound and flag for songQueue to next one
 Sound nujabase;
+// image of album/playlist (if provided)
+// Texture2D img = LoadTexture("/home/bubbq/cover.png");
+
+// the ith song in the song queue 
 int SONG = 0;
 int PLAYLIST = 0;
 // flag determining if we should be playing music or not
@@ -31,63 +39,42 @@ std::vector<BUTTON> buttons;
 // storing all the filepaths of users playlists
 void getPlaylists(){
 
-    std::ifstream inFile("playlistFiles.txt");
+    std::string user = std::getenv("USER");
 
-    if(!inFile){
-        std::cout << "Error, playlistFiles.txt could not be opened!" << std::endl;
-        return;
-    }
-    std::string filePath;
-    // each line contains a playlist file path from the user, read line by line to store all those paths in the vector
-    while(std::getline(inFile, filePath)){
-        playlists.push_back(filePath);
-        std::cout << "Playlist File: \t" << filePath << std::endl;
-    }
+    // find every directory in the music folder 
+    for(const auto& entry : fs::directory_iterator("/home/" + user + "/Music")){
+        if(entry.is_directory())
+            playlists.push_back(entry.path().string());
 
-    // prevent leak
-    inFile.close();
+        std::cout << "ADDED PLAYLIST: " + entry.path().string() << std::endl;
+    }
 }
 
 // loading all the mp3 file locations in a given playlist
-void getSongPath(std::string filePath) {
+void getSongPath(std::string albumPath) {
 
-    // loading standard input for the playlist file
-    std::ifstream file(filePath);
-    if (!file) {
-        std::cout << "Error opening " << filePath << std::endl;
-        return;
+    for(const auto& entry: fs::directory_iterator(albumPath)){
+        // get all the mp3s in the album directory and load into songQueue
+        if (entry.is_regular_file() && entry.path().extension() == ".mp3") 
+            songQueue.push_back(entry.path().string());
+        // else if (entry.path().extension() == ".png")
+            // img = LoadTexture(entry.path().c_str());
     }
 
-    // reading all lines of the file
-    std::string line;
-    while (std::getline(file, line)) {
-        // getting the position of location tag of xml file, holds the file path of mp3s 
-        size_t start = line.find("<location>");
-        size_t end = line.find("</location>");
-        if (start != std::string::npos && end != std::string::npos) {
-            // removing the '<location>file://' part of the tag
-            start += 17;
-            // add mp3 filepath to current playlist
-            songQueue.push_back(line.substr(start, end - start));
-            std::cout << line.substr(start, end - start) << std::endl;
-        }
-    }
-
-    // prevent leak
-    file.close();
 }
 
 void saveMusic(){
     // save the new current song
     std::ofstream outFile("savedMusic.txt");
     if(!outFile){
-        std::cout << "Error saving file to savedMusic.txt" << std::endl;
+        std::cout << "ERROR SAVING FILE" << std::endl;
         return;
     }
 
     // write the playlist path and the index of the song you were listening to
     outFile << playlists[PLAYLIST] << std::endl;
     outFile << SONG << std::endl;
+    outFile << PLAYLIST << std::endl;
     outFile.close();
 }
 
@@ -95,7 +82,7 @@ void saveMusic(){
 void loadMusic(){
     std::ifstream inFile("savedMusic.txt");
     if(!inFile){
-        std::cout << "HAVE NOT SAVED MUSIC" << std::endl;
+        std::cout << "NO MUSIC LOADED" << std::endl;
         return;
     }
     std::string info;
@@ -103,6 +90,8 @@ void loadMusic(){
     getSongPath(info);
     getline(inFile, info);
     SONG = std::stoi(info);
+    getline(inFile, info);
+    PLAYLIST = std::stoi(info);
     nujabase = LoadSound(songQueue[SONG].c_str());
     std::cout << "LOADED MUSIC" << std::endl;
 }
@@ -112,9 +101,9 @@ int main() {
     SetTargetFPS(60);
     InitWindow(512, 512, "Music Player");
     InitAudioDevice();
-    Vector2 mc = { 0 };
-    system("find ~/Music -name '*.xspf' > playlistFiles.txt");
-  
+    // Image i = LoadImage("/home/bubbq/Music/Dusk to Dawn/cover.png");
+    // Texture2D img = LoadTextureFromImage(i);
+    Vector2 mc = { 0 };  
     // find the playslists that a user has
     getPlaylists();
     // find all mp3s in chosen playlist
@@ -124,7 +113,7 @@ int main() {
     play.pos.height = 50;
     play.pos.width = 120;
     play.pos.x = (GetScreenWidth() * 0.500) - (play.pos.width * 0.500);
-    play.pos.y = GetScreenHeight() * 0.800;
+    play.pos.y = GetScreenHeight() * 0.850;
     play.color = GREEN;
     play.pc = 0;
     play.title = "PLAY";
@@ -148,7 +137,7 @@ int main() {
     while (!WindowShouldClose()) {
         // to move to next song if nothing is playing but the flag says so
         if(!IsSoundPlaying(nujabase) && PLAY){
-            std::cout << "MOVED TO NEXT SONG" << std::endl;
+            std::cout << "NEXT SONG" << std::endl;
             SONG++;
             // loop to beginning if we're at the last SONG
             if(SONG > (int)songQueue.size() - 1)
@@ -163,7 +152,7 @@ int main() {
             mc = GetMousePosition();
             if(!songQueue.empty()){
                 // toggling play/pause feature
-                if (CheckCollisionPointRec(mc, play.pos) && !songQueue.empty()) {
+                if (CheckCollisionPointRec(mc, play.pos)){
                     std::cout << "PLAY/PAUSED PRESSED" << std::endl;
                     // playing song (first time pressing button)
                     if (play.pc == 0) {
@@ -200,7 +189,6 @@ int main() {
                     PlaySound(nujabase);
                     play.title = "PAUSE";
                     PLAY = true;
-                    saveMusic();
                 }
 
                 // rewinding to last sound
@@ -218,19 +206,19 @@ int main() {
                     PlaySound(nujabase);
                     play.title = "PAUSE";
                     PLAY = true;
-                    saveMusic();
                 }
 
             }
-            else{
-                std::cout << "CHOOSE A PLAYLIST" << std::endl; 
-            }
-                    
+
+            else
+                std::cout << "NEED TO CHOOSE A PLAYLIST" << std::endl; 
+                
             // if the user pressed a playlist button, then update the song queue vector to have those songs
             for (int i = 0; i < (int)(buttons.size()); i++) {
-                if (CheckCollisionPointRec(mc, buttons[i].pos) && !IsSoundPlaying(nujabase)) {
+                if (CheckCollisionPointRec(mc, buttons[i].pos)) {
                     songQueue.clear();
                     getSongPath(playlists[i]);
+                    StopSound(nujabase);
                     SONG = 0;
                     nujabase = LoadSound(songQueue[SONG].c_str());
                     PlaySound(nujabase);
@@ -238,14 +226,18 @@ int main() {
                     PLAY = true;
                     // TODO: DONT ALLOW USER TO CHOOSE PLAYLIST THAT THEY ARE ALREADY IN BC IT RESETS THEIR PROGRESS
                     PLAYLIST = i;
+                    std::cout << "NOW ON PLAYLIST: " <<  playlists[i] << std::endl;
                     play.pc++;
+                    break;
                 }
             }
         }
 
+        
+        // start rendering 
         BeginDrawing();
 
-        // iterativley draw every playlist as a button to the side
+        // draw every playlist as a button to the side
         for(int i = 0; i < (int)playlists.size(); i++){
             BUTTON p;
             p.pos.height = 50;
@@ -261,7 +253,31 @@ int main() {
             DrawText(p.title.c_str(), p.pos.x + (p.pos.width * 0.250) - 20, p.pos.y + (p.pos.height * 0.300), 20, BLACK);
         }
 
-       // pause/play button
+        // getting the song name
+        size_t srt = songQueue[SONG].find_last_of('/');
+        size_t end = songQueue[SONG].find_last_of('.'); 
+        // song name
+        DrawText(songQueue[SONG].substr(srt + 1, end - srt - 1).c_str(), play.pos.x - (rewind.pos.x + rewind.pos.height) / 2, GetScreenHeight() * 0.750, 15, WHITE);
+
+        // Get current time
+        std::time_t t = std::time(nullptr);
+        std::tm* currentTime = std::localtime(&t);
+
+        // Format time as hh:mm:ss AM/PM
+        std::stringstream timeString;
+        timeString << std::put_time(currentTime, "%I:%M: %p");
+
+        // current time
+        DrawText(timeString.str().c_str(), GetScreenWidth() * 0.500, 20, 15, RAYWHITE);
+
+        // // album cover (if there is one)
+        // if(img.id != 0)
+        //     DrawTexture(img, 0, 0 , WHITE);
+    
+        // else
+        //     std::cout << "NO IMG" << std::endl;
+
+        // pause/play button
         DrawRectangle(play.pos.x, play.pos.y, play.pos.width, play.pos.height, play.color);
         DrawText(play.title.c_str(), play.pos.x + (play.pos.width * 0.250), play.pos.y + (play.pos.height * 0.300), 20, BLACK);
         
@@ -276,12 +292,21 @@ int main() {
         // benchmark testing
         DrawFPS(GetScreenWidth() * 0.780, GetScreenHeight() * 0.100);
         ClearBackground(BLACK);
+
+        // end rendering 
         EndDrawing();
     }
 
     // prevent leak
     UnloadSound(nujabase);
+    // UnloadImage(i);
+    // UnloadTexture(img);
     CloseWindow();
+
+    // only save playlist and song if user listened to something
+    if(!songQueue.empty())
+        saveMusic();
+
     return 0;
 }
 

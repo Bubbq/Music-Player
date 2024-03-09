@@ -1,4 +1,3 @@
-#include <cmath>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -16,7 +15,7 @@ std::vector<std::string> playlists;
 // base sound and flag for songQueue to next one
 Sound nujabase;
 // image of album/playlist (if provided)
-// Texture2D img = LoadTexture("/home/bubbq/cover.png");
+// Image i;
 
 // the ith song in the song queue 
 int SONG = 0;
@@ -58,7 +57,7 @@ void getSongPath(std::string albumPath) {
         if (entry.is_regular_file() && entry.path().extension() == ".mp3") 
             songQueue.push_back(entry.path().string());
         // else if (entry.path().extension() == ".png")
-            // img = LoadTexture(entry.path().c_str());
+            // i = LoadImage(entry.path().c_str());
     }
 
 }
@@ -85,6 +84,7 @@ void loadMusic(){
         std::cout << "NO MUSIC LOADED" << std::endl;
         return;
     }
+    
     std::string info;
     getline(inFile, info);
     getSongPath(info);
@@ -101,7 +101,6 @@ int main() {
     SetTargetFPS(60);
     InitWindow(512, 512, "Music Player");
     InitAudioDevice();
-    // Image i = LoadImage("/home/bubbq/Music/Dusk to Dawn/cover.png");
     // Texture2D img = LoadTextureFromImage(i);
     Vector2 mc = { 0 };  
     // find the playslists that a user has
@@ -233,10 +232,8 @@ int main() {
             }
         }
 
-        
         // start rendering 
         BeginDrawing();
-
         // draw every playlist as a button to the side
         for(int i = 0; i < (int)playlists.size(); i++){
             BUTTON p;
@@ -253,11 +250,13 @@ int main() {
             DrawText(p.title.c_str(), p.pos.x + (p.pos.width * 0.250) - 20, p.pos.y + (p.pos.height * 0.300), 20, BLACK);
         }
 
-        // getting the song name
-        size_t srt = songQueue[SONG].find_last_of('/');
-        size_t end = songQueue[SONG].find_last_of('.'); 
-        // song name
-        DrawText(songQueue[SONG].substr(srt + 1, end - srt - 1).c_str(), play.pos.x - (rewind.pos.x + rewind.pos.height) / 2, GetScreenHeight() * 0.750, 15, WHITE);
+        if(!songQueue.empty()){
+            // getting the song name
+            size_t srt = songQueue[SONG].find_last_of('/');
+            size_t end = songQueue[SONG].find_last_of('.'); 
+            // song name
+            DrawText(songQueue[SONG].substr(srt + 1, end - srt - 1).c_str(), play.pos.x - (rewind.pos.x + rewind.pos.height) / 2, GetScreenHeight() * 0.750, 15, WHITE);
+        }
 
         // Get current time
         std::time_t t = std::time(nullptr);
@@ -272,7 +271,7 @@ int main() {
 
         // // album cover (if there is one)
         // if(img.id != 0)
-        //     DrawTexture(img, 0, 0 , WHITE);
+        //     DrawTexture(img, 0, 0, WHITE);
     
         // else
         //     std::cout << "NO IMG" << std::endl;
@@ -298,7 +297,8 @@ int main() {
     }
 
     // prevent leak
-    UnloadSound(nujabase);
+    if(IsSoundPlaying(nujabase))
+        UnloadSound(nujabase);
     // UnloadImage(i);
     // UnloadTexture(img);
     CloseWindow();

@@ -1,4 +1,4 @@
-all: main.cpp
-	g++ main.cpp -o run -lraylib -lm -Werror -Wall -pedantic
+all: 
+	g++ main.cpp -o run -I ./raylib/src/ ./raylib/src/libraylib.a -lm -Wall -pedantic
 clean:
-	rm run && rm savedMusic.txt
+	rm run && rm savedMusic.txt && rm covers/*

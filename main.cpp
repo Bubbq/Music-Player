@@ -1,3 +1,5 @@
+#include <cstddef>
+#include <cstdio>
 #include <fstream>
 #include <raylib.h>
 #include <iostream>
@@ -68,7 +70,7 @@ void loadSongs(std::string filePath, std::vector<std::string>& songs){
 }
 
 // load the cover of the current song for viewing
-void loadCover(Sound& sound, Image& img, Texture2D& cover, Texture2D& background,  std::vector<std::string>& songs, int& sn){
+void loadCover(Image& img, Texture2D& cover, Texture2D& background,  std::vector<std::string>& songs, int& sn){
     
     UnloadTexture(cover);
     UnloadTexture(background);
@@ -91,6 +93,7 @@ void loadCover(Sound& sound, Image& img, Texture2D& cover, Texture2D& background
 
     cover = LoadTextureFromImage(img);
     background = LoadTextureFromImage(cp);
+    UnloadImage(cp);
 }
 
 // saves the cover of teh current song for veiwing
@@ -118,7 +121,7 @@ void saveCover(std::vector<std::string>& songs, int& sn){
 }
 
 // saves the last music user played by writing to some file
-void saveMusic(std::string playlistPath, int& sn, int& pn){
+void saveMusic(std::string playlistPath, int& sn, int& pn, int& cst){
 
     std::ofstream outFile("savedMusic.txt");
     if(!outFile){
@@ -129,12 +132,13 @@ void saveMusic(std::string playlistPath, int& sn, int& pn){
     outFile << playlistPath << std::endl;
     outFile << pn << std::endl;
     outFile << sn << std::endl;
+    outFile << cst << std::endl;
 
     outFile.close();
 }
 
 // updates the current song by the position update 'pu'
-void updateCurrentSong(Sound& sound, Image& img, Texture2D& cover, Texture2D& background, std::vector<std::string>& songs, bool& play, int& sn, int pu){
+void updateCurrentSong(Music& music, Image& img, Texture2D& cover, Texture2D& background, std::vector<std::string>& songs, bool& play, int& sn, int pu){
     
     // corrected value incase the current songs positioning is invalid
     int cv = pu > 0 ? 0 : int(songs.size() - 1);
@@ -143,21 +147,53 @@ void updateCurrentSong(Sound& sound, Image& img, Texture2D& cover, Texture2D& ba
     sn = (sn + pu > int(songs.size() - 1)) || (sn + pu < 0) ? cv : sn + pu;
 
     // play the new sound
-    StopSound(sound);
-    UnloadSound(sound);
-    sound = LoadSound(songs[sn].c_str());
-    PlaySound(sound);
+    if(IsMusicReady(music))
+        UnloadMusicStream(music);
+
+    music = LoadMusicStream(songs[sn].c_str());
+    music.looping = false;
+
+    PlayMusicStream(music);
 
     // save and load the new cover
     saveCover(songs, sn);
-    loadCover(sound, img, cover, background, songs, sn);
+    loadCover( img, cover, background, songs, sn);
 
     // set play flag to true to override pause, if any
     play = true;
 }
 
+// shows bar with current and remaining time displayed
+void drawProgressBar(int& cst, int& cml, double& dur){
+        // Convert the times to minutes and seconds
+
+        // current min and sec
+        int cm = cst / 60;
+        int cs = cst % 60;
+
+        // remaining min and sec
+        int rm = (cml - cst) / 60;
+        int rs = (cml - cst) % 60;
+
+        std::string currTime = std::to_string(cm) + ":" + (cs < 10 ? "0" : "") + std::to_string(cs);
+        std::string remainTime = std::to_string(rm) + ":" + (rs < 10 ? "0" : "") + std::to_string(rs);
+
+        // get percentage complete of the songs
+        dur = double(cst) / cml;
+        
+        DrawText(currTime.c_str(), ((WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500)) - 35, (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), 15, WHITE);
+        
+        DrawText(remainTime.c_str(), ((WINDOW_SIZE * 0.500) + (IMG_WIDTH * 0.500)) + 10, (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), 15, WHITE);
+
+        // progress bar
+        DrawRectangleRounded((Rectangle){((WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500)), (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), IMG_WIDTH, 12}, 20, 10, WHITE);
+        
+        // bar of music completed
+        DrawRectangleRounded((Rectangle){(WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500), (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), float(IMG_WIDTH * dur), 12}, 20, 10, (Color){160, 160, 160, 160});
+}
+
 // loads the last song and playlist a user was listening to
-bool loadMusic(Sound& sound, Image& img, Texture2D& cover, Texture2D& background, std::vector<std::string>& songs, int& sn, int& pn){
+bool loadMusic(Music& music, Image& img, Texture2D& cover, Texture2D& background, std::vector<std::string>& songs, int& sn, int& pn, int& cst){
 
     std::ifstream inFile("./savedMusic.txt");
     if(!inFile){
@@ -176,13 +212,22 @@ bool loadMusic(Sound& sound, Image& img, Texture2D& cover, Texture2D& background
 
     getline(inFile, info);
     sn = std::stoi(info);
+
+    getline(inFile, info);
+    cst = std::stoi(info);
     
     // load the last sound to play
-    sound = LoadSound(songs[sn].c_str());
+    music = LoadMusicStream(songs[sn].c_str());
+
+    // move to last position 
+    SeekMusicStream(music, cst);
+
+    // prevent looping
+    music.looping = false;
 
     // load the song cover
-    loadCover(sound, img, cover, background, songs, sn);
-    
+    loadCover(img, cover, background, songs, sn);
+
     return true;
     // std::cout << "LOADED MUSIC" << std::endl;
 }
@@ -193,7 +238,7 @@ int main() {
     SetTraceLogLevel(LOG_ERROR);
     
     // init
-    SetTargetFPS(30);
+    SetTargetFPS(120);
     InitWindow(WINDOW_SIZE, WINDOW_SIZE, "Music Player");
     InitAudioDevice();
     
@@ -207,7 +252,7 @@ int main() {
     std::vector<std::string> playlists;
 
     // the position of current playlist 
-    int pn = 0;
+    int pn = -1;
 
     // flag representing if we're supposed to be playing music or not
     bool play = false;
@@ -215,79 +260,70 @@ int main() {
     // number of times user pressed play/pause, needed for either playing or resuming sound
     int ppc = 0;
 
-    // loads music from a given mp3 path
-    Sound sound;
+    // current song time
+    int cst;
 
-    // jpg filePath and texture obj used to render cover art
+    // current music length
+    int cml;
+
+    // the percentage of completed music
+    double dur;
+
+    // loads music from a given mp3 path
+    Music music;
+
+    // jpg filePath and texture objs used to render cover and background art
     Image img;
     Texture2D cover;
     Texture2D background;
 
-    // the current time
-    std::time_t t = std::time(nullptr);
-    std::tm* ct = std::localtime(&t);
-        
-    // find all playlists a user has
+    // find all playlists a user has in their MUSIC folder
     loadPlaylists(playlists);
 
     // load music, if any
-    loadMusic(sound, img, cover, background, songs, sn, pn);
+    loadMusic(music, img, cover, background, songs, sn, pn, cst);
 
     // game loop
     while (!WindowShouldClose()) {
-
+        
         // start rendering
         BeginDrawing();
 
         // making cover and background image
-        if(cover.id != 0){
+        if(cover.id != 0 && background.id != 0){
             DrawTexture(background, 0, 0, RAYWHITE);
-            DrawTexture(cover, (WINDOW_SIZE * 0.500)  - (IMG_WIDTH * 0.500), (WINDOW_SIZE * 0.450) - (IMG_HEIGHT * 0.500), RAYWHITE);
+            DrawTexture(cover, (WINDOW_SIZE * 0.500)  - (IMG_WIDTH * 0.500), (WINDOW_SIZE * 0.465) - (IMG_HEIGHT * 0.500), RAYWHITE);
         }
-
-        DrawRectangleRounded((Rectangle){(WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500), (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), IMG_WIDTH, 12}, 20, 10, WHITE);
-        
-        // moving to the next song once current is finished
-        if(!IsSoundPlaying(sound) && play)
-            updateCurrentSong(sound, img, cover, background, songs, play, sn, 1);
-
-        // if (((Rectangle){10,10,10,10}, GuiIconText(ICON_ARROW_RIGHT_FILL, "Open Image"))) { /* ACTION */ }   
         
         // REWIND BTTN
         if(GuiButton((Rectangle){BTTN_X,BTTN_Y,BTTN_WIDTH,BTTN_HEIGHT}, "REWIND") && !songs.empty()){
 
-            updateCurrentSong(sound, img, cover, background, songs, play, sn, -1);
+            updateCurrentSong(music, img, cover, background, songs, play, sn, -1);
             // std::cout << "REWIND" << std::endl;
         }
         
         // PLAY PAUSE BTTN
-        if(GuiButton((Rectangle){BTTN_X + BTTN_WIDTH,BTTN_Y,BTTN_WIDTH,BTTN_HEIGHT}, play ? "PAUSE" : "PLAY") && !songs.empty()){
-            if(ppc == 0)
-                PlaySound(sound);
-                    
-            else if(!IsSoundPlaying(sound))
-                ResumeSound(sound);
-                    
-            else 
-                PauseSound(sound);
-
-            ppc++;
+        if(GuiButton((Rectangle){(WINDOW_SIZE * 0.500) - (BTTN_WIDTH * 0.500),BTTN_Y,BTTN_WIDTH,BTTN_HEIGHT}, play ? "PAUSE" : "PLAY") && !songs.empty()){
             play = !play;
-            // std::cout << "PLAY/PAUSE PRESSED" << std::endl;
+            if(ppc == 0)
+                PlayMusicStream(music);
+            if(!play)
+                PauseMusicStream(music);
+            else
+                ResumeMusicStream(music);
         }
 
         // SKIP BTTN
-        if(GuiButton((Rectangle){float(BTTN_X + (BTTN_WIDTH * 2.000)), BTTN_Y, BTTN_WIDTH,BTTN_HEIGHT}, "SKIP") && !songs.empty()){
+        if(GuiButton((Rectangle){WINDOW_SIZE - (BTTN_X + BTTN_WIDTH), BTTN_Y, BTTN_WIDTH,BTTN_HEIGHT}, "SKIP") && !songs.empty()){
 
-            // update the current song & cover
-            updateCurrentSong(sound, img, cover, background, songs, play, sn, 1);
+            updateCurrentSong(music, img, cover, background, songs, play, sn, 1);
             // std::cout << "SKIPPED" << std::endl;
         }
         
         // display every possible playlist
         for(int i = 0; i < (int)playlists.size(); i++){
 
-            if(GuiButton((Rectangle){10 , float(i * WINDOW_SIZE * 0.125) + 10,BTTN_WIDTH * 0.750, BTTN_HEIGHT * 0.750}, englishFormat(playlists[i]).c_str()) && pn != i){
+            if(GuiButton((Rectangle){10 , float(i * WINDOW_SIZE * 0.075) + 5,BTTN_WIDTH * 0.750, BTTN_HEIGHT * 0.750}, englishFormat(playlists[i]).c_str()) && pn != i){
     
                 // update the current playlist position
                 pn = i;
@@ -300,27 +336,51 @@ int main() {
                 loadSongs(playlists[i], songs);
    
                 // update the current song & cover
-                updateCurrentSong(sound, img, cover, background, songs, play, sn, -(sn));
+                updateCurrentSong(music, img, cover, background, songs, play, sn, -(sn));
             }
         }
         
-        // Format time 
-        std::stringstream timeString;
-        timeString << std::put_time(ct, "%I:%M");
+        if(IsMusicReady(music)){
 
-        std::stringstream dayMonth;
-        dayMonth << std::put_time(ct, "%A, %B %d");
+            if(!IsMusicStreamPlaying(music) && play)
+                updateCurrentSong(music, img, cover, background, songs, play, sn, 1);
+            
+            if(play)
+                UpdateMusicStream(music);
+
+            // init the cml & cst
+            cst = GetMusicTimePlayed(music);
+            cml = GetMusicTimeLength(music);
+            
+            // show bar with current time
+            drawProgressBar(cst, cml, dur);
+        }
+
+         // the current time
+        std::time_t t = std::time(nullptr);
+        std::tm* ct = std::localtime(&t);
+
+        // time string
+        std::stringstream ts;
         
-        // display current time
-        DrawText(timeString.str().c_str(), WINDOW_SIZE * 0.500 - (MeasureText(timeString.str().c_str(), 70) * 0.500), WINDOW_SIZE * 0.080, 70, RAYWHITE);
-        DrawText(dayMonth.str().c_str(), (WINDOW_SIZE * 0.500) - (MeasureText(dayMonth.str().c_str(), 25) * 0.500), WINDOW_SIZE * 0.020, 25, WHITE);
+        // day & month string
+        std::stringstream dm;
+        
+        ts << std::put_time(ct, "%I:%M");
+        dm << std::put_time(ct, "%A, %B %d");
+        
+        // Hour:Minute
+        DrawText(ts.str().c_str(), WINDOW_SIZE * 0.500 - (MeasureText(ts.str().c_str(), 70) * 0.500), WINDOW_SIZE * 0.080, 70, RAYWHITE);
+        
+        // Day, Month #date
+        DrawText(dm.str().c_str(), (WINDOW_SIZE * 0.500) - (MeasureText(dm.str().c_str(), 25) * 0.500), WINDOW_SIZE * 0.020, 25, WHITE);
         
         // display song name
         if(!songs.empty())
             DrawText(englishFormat(songs[sn]).c_str(), (WINDOW_SIZE * 0.500) - (MeasureText(englishFormat(songs[sn]).c_str(), 20) * 0.500), WINDOW_SIZE * 0.750, 20, WHITE);
 
         else
-            DrawText("---", WINDOW_SIZE * 0.500, WINDOW_SIZE * 0.750, 20, WHITE);
+            DrawText("---", ((WINDOW_SIZE * 0.500) - (MeasureText("---", 20) * 0.500)), WINDOW_SIZE * 0.750, 20, WHITE);
 
         DrawFPS(WINDOW_SIZE * 0.825, WINDOW_SIZE * 0.050);
 
@@ -331,17 +391,21 @@ int main() {
     }
 
     // prevent leak
-    if(!IsSoundPlaying(sound))
-        UnloadSound(sound);
-    UnloadImage(img);
-    UnloadTexture(cover);
-    UnloadTexture(background);
+    if(IsMusicReady(music)){
+        UnloadMusicStream(music);
+        UnloadImage(img);
+    }
+    if(cover.id!=0)
+        UnloadTexture(cover);
+    if(background.id != 0)
+        UnloadTexture(background);
     
     CloseWindow();
+    CloseAudioDevice();
 
-    // only save to file if user was playing any music
+    // only save to file if user played any music at all
     if(!songs.empty())
-        saveMusic(playlists[pn], sn, pn);
+        saveMusic(playlists[pn], sn, pn, cst);
 
     return 0;
 }

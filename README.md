@@ -8,4 +8,8 @@ PreReq's
 
 To Run
 
-"make ./run" in terminal
+"make && ./run" in terminal
+
+To remove all jpg's and covers folder
+
+"make clean" in terminal 

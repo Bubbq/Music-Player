@@ -14,15 +14,18 @@ namespace fs = std::filesystem;
 
 // replaces subtrings within strings in c++
 std::string ReplaceString(std::string subject, const std::string& search, const std::string& replace) {
+   
    size_t pos = 0;
+   
    while ((pos = subject.find(search, pos)) != std::string::npos) {
         subject.replace(pos, search.length(), replace);
         pos += replace.length();
    }
+   
    return subject;
 }
 
-// tranlastes any string to linux file format
+// tranlastes strings to linux file format
 std::string linuxFormat(std::string input){
 
     // change special characters
@@ -30,13 +33,14 @@ std::string linuxFormat(std::string input){
     input = ReplaceString(input, "(", "\\(");
     input = ReplaceString(input, ")", "\\)");
     input = ReplaceString(input, "&", "\\&");
-    input = ReplaceString(input, "'", "\\'\\");
+    input = ReplaceString(input, "'", "\\'");
 
     return input;
 }
 
-// converts file paths to engish
+// converts file paths to readable form
 std::string englishFormat(std::string input){
+    
     size_t srt = input.find_last_of('/') + 1;
     size_t end = input.find_last_of('.');
 
@@ -70,6 +74,7 @@ void loadSongs(std::string filePath, std::vector<std::string>& songs){
 // load the cover of the current song for viewing
 void loadCover(Image& img, Texture2D& cover, Texture2D& background,  std::vector<std::string>& songs, int& sn){
     
+    // unload the previous cover and background textures  
     UnloadTexture(cover);
     UnloadTexture(background);
     
@@ -81,7 +86,6 @@ void loadCover(Image& img, Texture2D& cover, Texture2D& background,  std::vector
         return;
     }
 
-    // if we have the img, load it and the approproate texture
     img = LoadImage(("./covers/" + englishFormat(songs[sn]) + ".jpg").c_str());
     ImageResize(&img, IMG_WIDTH, IMG_HEIGHT);
 
@@ -163,8 +167,30 @@ void updateCurrentSong(Music& music, Image& img, Texture2D& cover, Texture2D& ba
 }
 
 // shows bar with current and remaining time displayed
-void drawProgressBar(int& cst, int& cml, double& dur){
-        // Convert the times to minutes and seconds
+void drawProgressBar(Music& music, int& cst, int& cml, double& dur){
+
+        // the main bar 
+        Rectangle musicC = (Rectangle){(WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500), (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), IMG_WIDTH, 12};
+        
+        // when user clicks on progress bar, move them to that point in music
+        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON)){
+
+            Vector2 mc = GetMousePosition();
+
+            if(CheckCollisionPointRec(mc, musicC)){
+
+                // click width percentage
+                double cwp = (mc.x - ((WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500))) / IMG_WIDTH;
+
+                // get the current song time at that percentage
+                cst = cml * cwp;
+
+                // move to that point in time in music
+                SeekMusicStream(music, cst);
+
+                music.looping = false;
+            }
+        }
 
         // current min and sec
         int cm = cst / 60;
@@ -179,13 +205,15 @@ void drawProgressBar(int& cst, int& cml, double& dur){
 
         // get percentage complete of the songs
         dur = double(cst) / cml;
-        
+
+        // current time 
         DrawText(currTime.c_str(), ((WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500)) - 35, (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), 15, WHITE);
         
+        // time left 
         DrawText(remainTime.c_str(), ((WINDOW_SIZE * 0.500) + (IMG_WIDTH * 0.500)) + 10, (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), 15, WHITE);
 
         // progress bar
-        DrawRectangleRounded((Rectangle){((WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500)), (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), IMG_WIDTH, 12}, 20, 10, WHITE);
+        DrawRectangleRounded(musicC, 20, 10, WHITE);
         
         // bar of music completed
         DrawRectangleRounded((Rectangle){(WINDOW_SIZE * 0.500) - (IMG_WIDTH * 0.500), (WINDOW_SIZE * 0.775 + (BTTN_HEIGHT * 2.250) * 0.250), float(IMG_WIDTH * dur), 12}, 20, 10, (Color){160, 160, 160, 160});
@@ -265,7 +293,7 @@ int main() {
     // current music length
     int cml;
 
-    // the percentage of completed music
+    // the percentage of music completed
     double dur;
 
     // loads music from a given mp3 path
@@ -344,6 +372,7 @@ int main() {
         
         if(IsMusicReady(music)){
 
+            // moving onto the next song when current one finished
             if(!IsMusicStreamPlaying(music) && play)
                 updateCurrentSong(music, img, cover, background, songs, play, sn, 1);
             
@@ -355,7 +384,7 @@ int main() {
             cml = GetMusicTimeLength(music);
             
             // show bar with current time
-            drawProgressBar(cst, cml, dur);
+            drawProgressBar(music, cst, cml, dur);
         }
 
          // the current time
@@ -383,8 +412,6 @@ int main() {
 
         else
             DrawText("---", ((WINDOW_SIZE * 0.500) - (MeasureText("---", 20) * 0.500)), WINDOW_SIZE * 0.750, 20, WHITE);
-
-        DrawFPS(WINDOW_SIZE * 0.825, WINDOW_SIZE * 0.050);
 
         ClearBackground(BLANK);
 

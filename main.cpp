@@ -1,5 +1,3 @@
-#include <cstddef>
-#include <cstdio>
 #include <fstream>
 #include <raylib.h>
 #include <iostream>
@@ -93,6 +91,7 @@ void loadCover(Image& img, Texture2D& cover, Texture2D& background,  std::vector
 
     cover = LoadTextureFromImage(img);
     background = LoadTextureFromImage(cp);
+    
     UnloadImage(cp);
 }
 
@@ -297,8 +296,11 @@ int main() {
         
         // REWIND BTTN
         if(GuiButton((Rectangle){BTTN_X,BTTN_Y,BTTN_WIDTH,BTTN_HEIGHT}, "REWIND") && !songs.empty()){
-
-            updateCurrentSong(music, img, cover, background, songs, play, sn, -1);
+            
+            if(cst > 3)
+                SeekMusicStream(music, 0);
+            else
+                updateCurrentSong(music, img, cover, background, songs, play, sn, -1);
             // std::cout << "REWIND" << std::endl;
         }
         
@@ -395,6 +397,7 @@ int main() {
         UnloadMusicStream(music);
         UnloadImage(img);
     }
+
     if(cover.id!=0)
         UnloadTexture(cover);
     if(background.id != 0)

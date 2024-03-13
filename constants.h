@@ -1,4 +1,4 @@
-const int WINDOW_SIZE = 512;
+const int WINDOW_SIZE = 600;
 
 const int IMG_WIDTH = 250;
 const int IMG_HEIGHT = 250;

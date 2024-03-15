@@ -2,7 +2,7 @@
 
 PreReq's
 - Linux OS
-- (raylib dependencies)[https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux]
+- [raylib dependencies](https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux)
 - ffmpeg 
 - Have folders of mp3's in 'Music' folder in computer to simulate playlists/albums
 

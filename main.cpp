@@ -96,14 +96,14 @@ void loadCover(Image& img, Texture2D& cover, Texture2D& background,  std::vector
     UnloadTexture(background);
     
     // check if img exists already
-    std::ifstream inFile("../covers/" + englishFormat(songs[sn]) + ".jpg");
+    std::ifstream inFile("covers/" + englishFormat(songs[sn]) + ".jpg");
 
     if(!inFile){
         std::cerr << "NO COVER TO LOAD \n";
         return;
     }
 
-    img = LoadImage(("../covers/" + englishFormat(songs[sn]) + ".jpg").c_str());
+    img = LoadImage(("covers/" + englishFormat(songs[sn]) + ".jpg").c_str());
     ImageResize(&img, IMG_WIDTH, IMG_HEIGHT);
 
     Image cp = ImageCopy(img);
@@ -120,19 +120,19 @@ void loadCover(Image& img, Texture2D& cover, Texture2D& background,  std::vector
 void saveCover(std::vector<std::string>& songs, int& sn){
     
     // check if 'covers' folder exists, if not, then create
-    std::ifstream covers("../covers");
+    std::ifstream covers("covers");
 
     if(!covers)
-        system("mkdir ../covers");
+        system("mkdir covers");
 
     // TODO: FIX FOR MULTIPLE OS
     std::string fs = linuxFormat(songs[sn]);
 
     // check if the img has been saved already
-    std::ifstream inFile("../covers/" + englishFormat(songs[sn]) + ".jpg");
+    std::ifstream inFile("covers/" + englishFormat(songs[sn]) + ".jpg");
 
     if(!inFile){
-        std::string command = "ffmpeg -i " + fs + " -vf scale=250:-1" + " ../covers/" + englishFormat(fs) + ".jpg -loglevel error";  
+        std::string command = "ffmpeg -i " + fs + " -vf scale=250:-1" + " covers/" + englishFormat(fs) + ".jpg -loglevel error";  
         std::system(command.c_str());
     }
 
@@ -143,7 +143,7 @@ void saveCover(std::vector<std::string>& songs, int& sn){
 // saves the last music user played by writing to some file
 void saveMusic(std::string playlistPath, int& sn, int& pn, int& cst, float& volume){
 
-    std::ofstream outFile("../savedMusic.txt");
+    std::ofstream outFile("savedMusic.txt");
     if(!outFile){
         std::cerr << "ERROR SAVING MUSIC" << std::endl;
         return;
@@ -240,7 +240,7 @@ void drawProgressBar(Music& music, int& cst, int& cml, double& dur){
 // loads the last song and playlist a user was listening to
 bool loadMusic(Music& music, Image& img, Texture2D& cover, Texture2D& background, std::vector<std::string>& songs, int& sn, int& pn, int& cst, float& volume){
 
-    std::ifstream inFile("../savedMusic.txt");
+    std::ifstream inFile("savedMusic.txt");
     if(!inFile){
         std::cerr << "NO MUSIC SAVED" << std::endl;
         return false;
@@ -354,7 +354,7 @@ int main() {
 	// VOL UP BTTN
 	if (GuiButton((Rectangle){WINDOW_SIZE - BTTN_HEIGHT - 10, 10, BTTN_HEIGHT, BTTN_HEIGHT}, "+")) {
 		if (volume < 1.0) {
-			std::cout << "Volume up!\n";
+			std::cout << "Volume up! " << volume << '\n';
 			volume += 0.1;
     			SetMusicVolume(music, volume);
 		} else {
@@ -365,7 +365,7 @@ int main() {
 	// VOL DOWN BTTN
 	if (GuiButton((Rectangle){WINDOW_SIZE - BTTN_HEIGHT*2 - 15, 10, BTTN_HEIGHT, BTTN_HEIGHT}, "-")) {
 		if (volume > 0.1) {
-			std::cout << "Volume down!\n";
+			std::cout << "Volume down! " << volume << '\n';
 			volume -= 0.1;
     			SetMusicVolume(music, volume);
 		} else {

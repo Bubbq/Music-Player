@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <filesystem>
 
 #include "constants.h"
@@ -84,6 +85,7 @@ void loadSongs(std::string filePath, std::vector<std::string>& songs){
             songs.push_back(entry.path());
             // std::cout << "SONG ADDED: " << entry.path() << std::endl;
     }
+    std::sort(songs.begin(), songs.end());
 }
 
 // load the cover of the current song for viewing

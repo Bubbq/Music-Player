@@ -6,17 +6,25 @@
 #include <algorithm>
 #include <filesystem>
 
-
-#include "constants.h"
-
-
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
+const int WINDOW_SIZE = 512;
+
+const int IMG_WIDTH = 250;
+const int IMG_HEIGHT = 250;
+
+const int BTTN_WIDTH = 100;
+const int BTTN_HEIGHT = 35;
+
+const float BTTN_X = WINDOW_SIZE * 0.167;
+const float BTTN_Y = WINDOW_SIZE * 0.875;
+
+std::string USERNAME = std::getenv("USER");
+std::string COVERS_PATH = "/home/" + USERNAME + "/.cache/Music-Player-SRC/covers/";
 
 // used for traversing the entries in a single directory.
 namespace fs = std::filesystem;
-
 
 // replaces subtrings within strings in c++
 std::string ReplaceString(std::string subject, const std::string& search, const std::string& replace) {
@@ -30,19 +38,6 @@ std::string ReplaceString(std::string subject, const std::string& search, const 
  
   return subject;
 }
-
-
-bool checkValidDir(std::string path) {
-   if (fs::is_empty(path)) return false;
-   else {
-       for(const auto& entry : fs::directory_iterator(path)){
-           if(entry.path().extension() == ".mp3")
-               return true;
-       }
-   }
-   return false;
-}
-
 
 // tranlastes strings to linux file format
 std::string linuxFormat(std::string input){
@@ -90,7 +85,7 @@ void loadPlaylists(std::vector<std::string>& playlists){
 // to load all mp3 filepaths in a given playlist
 void loadSongs(std::string filePath, std::vector<std::string>& songs){
    // iterate through all files in 'filePath'
-   for(const auto& entry : fs::directory_iterator(filePath)){
+   for(const auto& entry : fs::recursive_directory_iterator(filePath)){
        if(entry.path().extension() == ".mp3")
            songs.push_back(entry.path());
            // std::cout << "SONG ADDED: " << entry.path() << std::endl;
@@ -490,7 +485,6 @@ int main() {
 
 
            if(GuiButton((Rectangle){10 , float(i * WINDOW_SIZE * 0.075) + 10,BTTN_WIDTH * 0.750, BTTN_HEIGHT}, englishFormat(playlists[i]).c_str()) && pn != i){
-       if (checkValidDir(playlists[i])) {
                    // update the current playlist position
                    pn = i;
                   
@@ -501,12 +495,13 @@ int main() {
                    // load new songs in selected playlist
                    songs.clear();
                    loadSongs(playlists[i], songs);
- 
-                   // update the current song & cover
-                   updateCurrentSong(music, img, cover, background, songs, play, sn, -(sn));
-           } else {
-           std::cout << "Invalid directory " << playlists[i] << '\n';
-           }
+
+		   if (songs.empty()) {
+			std::cout << "Empty song vector, loading old songs\n";
+		   } else {
+                   	// update the current song & cover
+                   	updateCurrentSong(music, img, cover, background, songs, play, sn, -(sn));
+		   }
        }
        }
       

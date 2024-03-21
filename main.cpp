@@ -117,7 +117,7 @@ void loadCover(Image& img, Texture2D& cover, Texture2D& background,  std::vector
 
    Image cp = ImageCopy(img);
    ImageResize(&cp, WINDOW_SIZE, WINDOW_SIZE);
-   ImageBlurGaussian(&cp, 30);
+   ImageBlurGaussian(&cp, 10);
 
 
    cover = LoadTextureFromImage(img);

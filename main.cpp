@@ -426,7 +426,7 @@ int main()
 			updateCurrentSong(music, img, cover, background, songs, play, sn, 1);
 		}
       
-		// display every possible playlist
+		// display every playlist user has
 		for(int i = 0; i < (int)playlists.size(); i++)
 		{
 			if(GuiButton((Rectangle){10 , float(i * WINDOW_SIZE * 0.075) + 10,BTTN_WIDTH * 0.750, BTTN_HEIGHT}, englishFormat(playlists[i]).c_str()) && pn != i)

@@ -7,7 +7,7 @@
 #include <filesystem>
 
 #define RAYGUI_IMPLEMENTATION
-#include "raygui.h"
+#include "headers/raygui.h"
 
 const int WINDOW_SIZE = 512;
 
@@ -363,37 +363,6 @@ int main()
            DrawTexture(cover, (WINDOW_SIZE * 0.500)  - (IMG_WIDTH * 0.500), (WINDOW_SIZE * 0.465) - (IMG_HEIGHT * 0.500), RAYWHITE);
        }
 
-		// VOL UP BTTN
-		if (GuiButton((Rectangle){WINDOW_SIZE - BTTN_HEIGHT - 10, 10, BTTN_HEIGHT, BTTN_HEIGHT}, "+"))
-		{
-			if (volume < 1.0)
-			{
-				std::cout << "Volume up! " << volume << '\n';
-				volume += 0.1;
-					SetMusicVolume(music, volume);
-			} 
-			
-			else
-			{
-				std::cout << "Volume at maximum value " << volume << '\n';
-			}
-		}
-
-		// VOL DOWN BTTN
-		if (GuiButton((Rectangle){WINDOW_SIZE - BTTN_HEIGHT*2 - 15, 10, BTTN_HEIGHT, BTTN_HEIGHT}, "-"))
-		{
-			if (volume > 0.1)
-			{
-				std::cout << "Volume down! " << volume << '\n';
-				volume -= 0.1;
-					SetMusicVolume(music, volume);
-			} 
-			else
-			{
-				std::cout << "Volume at minimum value " << volume << '\n';
-			}
-		}
-      
 		// REWIND BTTN
 		if(GuiButton((Rectangle){BTTN_X,BTTN_Y,BTTN_WIDTH,BTTN_HEIGHT}, "REWIND") && !songs.empty())
 		{

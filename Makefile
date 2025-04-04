@@ -1,7 +1,4 @@
 # all: 
-# ifeq (,$(wildcard raylib/src/libraylib.a))
-# 	make -C raylib/src/
-# endif
 # 	g++ main.cpp -o run -I raylib/src/ raylib/src/libraylib.a -lm 
 
 # clean:
@@ -9,4 +6,4 @@
 # 	rm run
 
 all:
-	gcc music_player.c -o run -lraylib -lm -Wall
+	gcc music_player.c c_string.c list.c -o run -lraylib -lm -Wall

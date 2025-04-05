@@ -12,87 +12,41 @@ const char* MUSIC_PATH = "$HOME/Music";
 
 typedef struct
 {
-    char path[MAX_LEN];
+    char* path;
     list song_paths;
 }playlist;
-
-typedef struct
-{
-    playlist* playlists;
-}library;
 
 char* linux_format(char* file_path)
 {
     const char* DELIM = " ()&'`\\";
     char* replacement_characters[] = {"\\ ", "\\(", "\\)", "\\&", "\\'", "\\`", "\\\""};
-
-    list valid_path_chunks = create_list(STRING);
-    list replacements = create_list(INT);
-
-    // get a list of replacement chars to be appended with the valid path parts
+    
+    int length = 0;
+    static char linux_file_path[MAX_LEN];
+    memset(linux_file_path, 0, sizeof(linux_file_path));
     for(int i = 0; i < strlen(file_path); i++)
     {
-        char* found_position = strchr(DELIM, file_path[i]);
-        if(found_position != NULL)
+        char* found = strchr(DELIM, file_path[i]);
+        if(found != NULL)
         {
-            int replacement_index = found_position - DELIM;
-            add_element(&replacements, &replacement_index);
+            int index = found - DELIM;
+            char* dest = linux_file_path + length;
+            char* replacement = replacement_characters[index];
+            length += snprintf(dest, (dest - linux_file_path), "%s", replacement); // snprintf returns the number of characters written
+        }
+
+        else
+        {
+            linux_file_path[length++] = file_path[i];
         }
     }
 
-    // partion the valid characters of the filepath
-    char* buffer = strtok(file_path, DELIM);   
-    while(buffer != NULL)
-    {
-        string str = create_string();
-        update_string(&str, buffer);
-        add_element(&valid_path_chunks, &str);
-        buffer = strtok(NULL, DELIM);
-    }
-
-    // combine the chunks and the replacement parts into a string
-    char linux_file_path[MAX_LEN];
-    int length = 0;
-    int a = 0; int b = 0;
-    while((a < valid_path_chunks.size) || (b < replacements.size))
-    {
-        if(a < valid_path_chunks.size)
-        {
-            char* chunk = ((string*)valid_path_chunks.elements)[a++].value;
-            // snprint returns the length of chars appended
-            length += snprintf((linux_file_path + length), sizeof(linux_file_path) - length, "%s", chunk);
-        }
-
-        if(b < replacements.size)
-        {
-            int replacement_index = ((int*)replacements.elements)[b++];
-            length += snprintf((linux_file_path + length), sizeof(linux_file_path) - length, "%s", replacement_characters[replacement_index]);
-        }
-    }
-    
-    if(strlen(linux_file_path) >= MAX_LEN)
-    {
-        printf("%s exceeds max length", linux_file_path);
-        return "";
-    }
-
-    free_list(&valid_path_chunks);
-    free_list(&replacements);
-
-    strcpy(file_path, linux_file_path);
-    return file_path;
+    return linux_file_path;
 }
 
-void get_playlist_paths(playlist* playlist)
+// print out the filepaths of every playlist
+void get_playlist_paths(playlist* playlists)
 {
-    char current_directory[MAX_LEN];
-    if(getcwd(current_directory, sizeof(current_directory)) == NULL)
-    {
-        printf("error retreiving the current directory\n");
-        return;
-    }
-
-    // print out the filepaths of every playlist
     char command[MAX_LEN];
     snprintf(command, sizeof(command), "ls -1d %s/*", MUSIC_PATH);
 
@@ -104,7 +58,7 @@ void get_playlist_paths(playlist* playlist)
     {
         int stopping_point = strcspn(buffer, "\n");
         buffer[stopping_point] = '\0';
-        strcpy(playlist->path, linux_format(buffer));
+        playlists[count].path = linux_format(buffer);
         count++;
     }
     pclose(file_ptr);
@@ -131,11 +85,20 @@ void get_songs_from_playlist(list* song_paths, const char* playlist_path)
 
 int main()
 {
-    playlist playlists;
-    playlists.song_paths = create_list(STRING);
+    // TODO, make list of a playlist type
+    // create library struct
+    // mayb clean the reading command loop repetitivness
+    // grab images from mp3
 
-    get_playlist_paths(&playlists);
-    get_songs_from_playlist(&playlists.song_paths, playlists.path);
+    playlist library[N_PLAYLIST];
+    get_playlist_paths(library);
+    for(int i = 0; i < 3; i++)
+    {
+        printf("%s\n", library[i].path);
+    }
+    // playlists.song_paths = create_list(STRING);
 
-    free_list(&playlists.song_paths);
+    // get_songs_from_playlist(&playlists.song_paths, playlists.path);
+
+    // free_list(&playlists.song_paths);
 }

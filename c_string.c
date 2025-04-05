@@ -12,7 +12,7 @@ void update_string(string* str, char* new_str)
 {
     if(strlen(new_str) > MAX_LEN)
     {
-        perror("new string is larger than the max size");
+        printf("new string is larger than the max size");
         return;
     }
 

@@ -4,9 +4,8 @@
 typedef enum
 {
     INT = 0,
-    DOUBLE = 1,
-    FLOAT = 2,
-    STRING = 3,
+    STRING = 1,
+    PLAYLIST = 2,
 } type;
 
 typedef struct

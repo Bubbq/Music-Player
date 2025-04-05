@@ -8,8 +8,6 @@ size_t get_size(type type)
     switch (type)
     {
         case INT: return sizeof(int);
-        case DOUBLE: return sizeof(double);
-        case FLOAT: return sizeof(float);
         case STRING: return sizeof(string); 
         default: 
             return -1;
@@ -47,17 +45,7 @@ void add_element(list* list, void* input)
             ptr = ((int*)list->elements) + list->size;
             memcpy(ptr, (int*)input, get_size(list->type));
             break;
-
-        case DOUBLE:
-            ptr = ((double*)list->elements) + list->size;
-            memcpy(ptr, (double*)input, sizeof(double));
-            break;
-
-        case FLOAT:
-            ptr = ((float*)list->elements) + list->size;
-            memcpy(ptr, (float*)input, sizeof(float));
-            break;
-
+            
         case STRING: 
             ptr = ((string*)list->elements) + list->size;
             memcpy(ptr, (string*)input, sizeof(string));
@@ -76,8 +64,6 @@ void print_list(list*list)
         switch (list->type)
         {
             case INT: printf("%d\n", ((int*)list->elements)[i]); break;
-            case DOUBLE: printf("%f\n", ((double*)list->elements)[i]); break;
-            case FLOAT: printf("%d\n", ((int*)list->elements)[i]); break;
             case STRING: printf("%s\n", ((string*)list->elements)[i].value); break;
             default:
                 return;

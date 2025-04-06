@@ -1,5 +1,5 @@
 #define CSTR
-#define MAX_LEN 128
+#define MAX_LEN 256
 
 typedef struct
 {

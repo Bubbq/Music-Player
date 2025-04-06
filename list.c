@@ -38,22 +38,8 @@ void add_element(list* list, void* input)
         resize_list(list);
     }
 
-    void* ptr;
-    switch (list->type)
-    {
-        case INT:
-            ptr = ((int*)list->elements) + list->size;
-            memcpy(ptr, (int*)input, get_size(list->type));
-            break;
-            
-        case STRING: 
-            ptr = ((string*)list->elements) + list->size;
-            memcpy(ptr, (string*)input, sizeof(string));
-            break;
-
-        default:
-            return;
-    }
+    void* ptr = (char*)list->elements + (list->size * get_size(list->type)); 
+    memcpy(ptr, input, get_size(list->type)); 
     list->size++;
 }
 

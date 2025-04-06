@@ -6,20 +6,43 @@
 #include "headers/raylib.h"
 #include "headers/c_string.h"
 #include "headers/list.h"
+#include <stdio.h>
 
-#define N_PLAYLIST 10
-const char* MUSIC_PATH = "$HOME/Music";
+const char* PLAYLIST_DIR = "$HOME/Music";
+const char* MP3_COVER_PATH = "$HOME/.cache/mp3_covers/";
 
 typedef struct
 {
-    char* path;
+    char path[MAX_LEN];
     list song_paths;
 }playlist;
 
-char* linux_format(char* file_path)
+char* english_format(char* file_path)
 {
-    const char* DELIM = " ()&'`\\";
-    char* replacement_characters[] = {"\\ ", "\\(", "\\)", "\\&", "\\'", "\\`", "\\\""};
+    static char result[MAX_LEN];
+    memset(result, 0, sizeof(result));
+
+    char* src = file_path;
+    char* dst = result;
+
+    while (*src && (*src != '.'))
+    {
+        if (*src != '\\')
+        {
+            *dst = *src;
+            dst++;
+        }
+        src++;
+    }
+
+    *dst = '\0';
+    return result;
+}
+
+char* linux_format(const char* file_path)
+{
+    const char* DELIM = " ()&'`\\!";
+    char* replacement_characters[] = {"\\ ", "\\(", "\\)", "\\&", "\\'", "\\`", "\\\"", "\\!"};
     
     int length = 0;
     static char linux_file_path[MAX_LEN];
@@ -32,7 +55,8 @@ char* linux_format(char* file_path)
             int index = found - DELIM;
             char* dest = linux_file_path + length;
             char* replacement = replacement_characters[index];
-            length += snprintf(dest, (dest - linux_file_path), "%s", replacement); // snprintf returns the number of characters written
+            int characters_written = snprintf(dest, (dest - linux_file_path), "%s", replacement); 
+            length += (characters_written < MAX_LEN - length) ? characters_written : (MAX_LEN - length - 1);
         }
 
         else
@@ -41,25 +65,23 @@ char* linux_format(char* file_path)
         }
     }
 
+    linux_file_path[length] = '\0';
     return linux_file_path;
 }
 
-// print out the filepaths of every playlist
 void get_playlist_paths(playlist* playlists)
 {
     char command[MAX_LEN];
-    snprintf(command, sizeof(command), "ls -1d %s/*", MUSIC_PATH);
+    snprintf(command, sizeof(command), "ls -1d %s/*", PLAYLIST_DIR);
 
-    int count = 0;
     char buffer[MAX_LEN];
     FILE* file_ptr = popen(command, "r");
 
-    while((fgets(buffer, sizeof(buffer), file_ptr) != NULL) && (count < N_PLAYLIST))
+    while((fgets(buffer, sizeof(buffer), file_ptr) != NULL))
     {
         int stopping_point = strcspn(buffer, "\n");
         buffer[stopping_point] = '\0';
-        playlists[count].path = linux_format(buffer);
-        count++;
+        sprintf(playlists->path, "%s", linux_format(buffer));
     }
     pclose(file_ptr);
 }
@@ -78,9 +100,31 @@ void get_songs_from_playlist(list* song_paths, const char* playlist_path)
         string temp = create_string();
         update_string(&temp, linux_format(buffer));
         add_element(song_paths, &temp);
-        printf("%s\n", ((string*)song_paths->elements)[song_paths->size - 1].value);
     }
     pclose(file_ptr);
+}
+
+void get_song_cover(const char* playlist_path, char* song_path)
+{
+    char cmd[MAX_LEN];
+    // todo: only make directory when its not here
+    snprintf(cmd, sizeof(cmd), "mkdir %s", MP3_COVER_PATH);
+    system(cmd);
+
+    char* english = english_format(song_path);
+    char image_path[MAX_LEN];
+    sprintf(image_path, "%s/.cache/mp3_covers/%s.jpg", getenv("HOME"), english);
+    
+    FILE* ptr = fopen(image_path, "r");
+    if(ptr == NULL)
+    {
+        snprintf(cmd, sizeof(cmd), "ffmpeg -i %s/%s -an -vcodec copy \"%s%s.jpg\" -loglevel error", playlist_path, song_path, MP3_COVER_PATH, english);
+        system(cmd);
+    }
+    else
+    {
+        fclose(ptr);
+    }
 }
 
 int main()
@@ -88,17 +132,12 @@ int main()
     // TODO, make list of a playlist type
     // create library struct
     // mayb clean the reading command loop repetitivness
-    // grab images from mp3
 
-    playlist library[N_PLAYLIST];
-    get_playlist_paths(library);
-    for(int i = 0; i < 3; i++)
-    {
-        printf("%s\n", library[i].path);
-    }
-    // playlists.song_paths = create_list(STRING);
-
-    // get_songs_from_playlist(&playlists.song_paths, playlists.path);
-
-    // free_list(&playlists.song_paths);
+    playlist playlist;
+    playlist.song_paths = create_list(STRING);
+    
+    get_playlist_paths(&playlist);
+    // get_songs_from_playlist(&playlist.song_paths, playlist.path);
+    // get_song_cover(playlist.path, ((string*)playlist.song_paths.elements)[0].value);
+    free_list(&playlist.song_paths);
 }

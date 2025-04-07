@@ -3,9 +3,8 @@
 
 typedef struct
 {
-    int length;
     char* value;
 } string;
 
-string create_string();
+string create_string( char* str);
 void update_string(string* str, char* new_str);

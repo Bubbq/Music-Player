@@ -2,7 +2,6 @@
 #include <string.h>
 #include "headers/list.h"
 #include "headers/c_string.h"
-
 size_t get_size(type type)
 {
     switch (type)
@@ -38,6 +37,7 @@ void add_element(list* list, void* input)
         resize_list(list);
     }
 
+    // move pointer forward size*nelements * 1 bytes 
     void* ptr = (char*)list->elements + (list->size * get_size(list->type)); 
     memcpy(ptr, input, get_size(list->type)); 
     list->size++;

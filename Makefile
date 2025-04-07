@@ -6,4 +6,4 @@
 # 	rm run
 
 all:
-	gcc music_player.c c_string.c list.c -o run -lraylib -lm -Wall
+	gcc music_player.c c_string.c list.c playlist.c -o run -lraylib -lm -Wall

@@ -3,14 +3,17 @@
 #include <string.h>
 #include "headers/c_string.h"
 
-string create_string()
+string create_string(char* str)
 {
-    return (string){0, NULL};
+    string string;
+    string.value = malloc(sizeof(char) * (strlen(str) + 1));
+    strcpy(string.value, str);
+    return string;
 }
 
 void update_string(string* str, char* new_str)
 {
-    if(strlen(new_str) > MAX_LEN)
+    if((strlen(new_str) + 1) > MAX_LEN)
     {
         printf("new string is larger than the max size");
         return;
@@ -22,5 +25,4 @@ void update_string(string* str, char* new_str)
     }
     str->value = malloc(sizeof(char) * (strlen(new_str) + 1));
     strcpy(str->value, new_str);
-    str->length = strlen(str->value);
 }

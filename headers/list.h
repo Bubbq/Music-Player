@@ -1,3 +1,4 @@
+#ifndef LIST_H
 #define LIST_H
 #include "stdio.h"
 
@@ -22,3 +23,5 @@ void resize_list(list* list);
 void print_list(list* list);
 void add_element(list* list, void* input);
 void free_list(list* list);
+
+#endif

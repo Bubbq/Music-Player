@@ -1,10 +1,9 @@
 #include "headers/playlist.h"
 #include "headers/c_string.h"
+#include "headers/list.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-// const char* ROOT = "$HOME";
-// const char* MP3_COVER_PATH = ".cache/mp3_covers";
 
 char* format_as_display(char* file_path)
 {
@@ -57,37 +56,43 @@ char* linux_formatted_filename(const char* file_path)
     return linux_file_path;
 }
 
-void load_playlists_from_folder(playlist* playlists, const char* music_folder)
+void load_playlists_from_folder(list* playlists, const char* music_folder)
 {
     char command[MAX_LEN];
     snprintf(command, sizeof(command), "ls -1d %s/*", music_folder);
-
+    
+    int count = 0;
     char buffer[MAX_LEN];
     FILE* file_ptr = popen(command, "r");
-    while((fgets(buffer, sizeof(buffer), file_ptr) != NULL))
+    while((fgets(buffer, sizeof(buffer), file_ptr) != NULL) && (count < NPLAYLIST))
     {
         buffer[strcspn(buffer, "\n")] = '\0';
-        playlists->path = linux_formatted_filename(buffer);
+        playlist playlist;
+        playlist.path = linux_formatted_filename(buffer);
+        add_element(playlists, &playlist);
     }
     pclose(file_ptr);
 }
 
-void load_songs_from_playlist(list* song_paths, const char* playlist_path)
+list load_songs_from_playlist(const char* playlist_path)
 {
     char command[MAX_LEN];
     snprintf(command, sizeof(command), "cd %s; ls -1", playlist_path);
 
     char buffer[MAX_LEN];
     FILE* file_ptr = popen(command, "r");
+    list song_paths = create_list(STRING);
     while((fgets(buffer, sizeof(buffer), file_ptr) != NULL))
     {
         buffer[strcspn(buffer, "\n")] = '\0';
         char* linux_path = linux_formatted_filename(buffer);
         string temp = create_string(linux_path);
-        add_element(song_paths, &temp);
+        add_element(&song_paths, &temp);
         free(linux_path);
     }
     pclose(file_ptr);
+
+    return song_paths;
 }
 
 void extract_song_cover(const char* playlist_path, char* song_path, const char* cover_location)

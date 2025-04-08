@@ -1,13 +1,16 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "headers/list.h"
 #include "headers/c_string.h"
+#include "headers/playlist.h"
 size_t get_size(type type)
 {
     switch (type)
     {
         case INT: return sizeof(int);
         case STRING: return sizeof(string); 
+        case PLAYLIST: return sizeof(playlist);
         default: 
             return -1;
     }
@@ -51,6 +54,7 @@ void print_list(list*list)
         {
             case INT: printf("%d\n", ((int*)list->elements)[i]); break;
             case STRING: printf("%s\n", ((string*)list->elements)[i].value); break;
+            case PLAYLIST:
             default:
                 return;
         }
@@ -63,9 +67,20 @@ void free_list(list *list)
     {
         for (int i = 0; i < list->size; i++)
         {
-            free(((string*)list->elements)[i].value);  
+            string* s = (string*)list->elements + i;
+            free(s->value);  
         }
     }
+
+    else if(list->type == PLAYLIST)
+    {
+        for(int i = 0; i < list->size; i++)
+        {
+            playlist* ptr = (playlist*)list->elements + i;
+            free(ptr->path);
+            free_list(&ptr->song_paths);
+        }
+    }    
     
     free(list->elements);
 }

@@ -5,6 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+void get_full_song_path(char* dst, char* playlist_path, char* song_path)
+{
+    char* playlist = format_as_display(playlist_path);
+    sprintf(dst, "%s/%s", playlist, song_path);
+    free(playlist);
+}
+
 char* format_as_display(char* file_path)
 {
     char* result = malloc(sizeof(char) * strlen(file_path) + 1);
@@ -61,10 +68,9 @@ void load_playlists_from_folder(list* playlists, const char* music_folder)
     char command[MAX_LEN];
     snprintf(command, sizeof(command), "ls -1d %s/*", music_folder);
     
-    int count = 0;
     char buffer[MAX_LEN];
     FILE* file_ptr = popen(command, "r");
-    while((fgets(buffer, sizeof(buffer), file_ptr) != NULL) && (count < NPLAYLIST))
+    while((fgets(buffer, sizeof(buffer), file_ptr) != NULL))
     {
         buffer[strcspn(buffer, "\n")] = '\0';
         playlist playlist;
@@ -74,25 +80,20 @@ void load_playlists_from_folder(list* playlists, const char* music_folder)
     pclose(file_ptr);
 }
 
-list load_songs_from_playlist(const char* playlist_path)
+void load_songs_from_playlist(list* songs, const char* playlist_path)
 {
     char command[MAX_LEN];
     snprintf(command, sizeof(command), "cd %s; ls -1", playlist_path);
 
     char buffer[MAX_LEN];
     FILE* file_ptr = popen(command, "r");
-    list song_paths = create_list(STRING);
     while((fgets(buffer, sizeof(buffer), file_ptr) != NULL))
     {
         buffer[strcspn(buffer, "\n")] = '\0';
-        char* linux_path = linux_formatted_filename(buffer);
-        string temp = create_string(linux_path);
-        add_element(&song_paths, &temp);
-        free(linux_path);
+        string temp = create_string(buffer);
+        add_element(songs, &temp);
     }
     pclose(file_ptr);
-
-    return song_paths;
 }
 
 void extract_song_cover(const char* playlist_path, char* song_path, const char* cover_location)
@@ -102,15 +103,17 @@ void extract_song_cover(const char* playlist_path, char* song_path, const char* 
     system(cmd);
 
     char* cover_name = format_as_display(song_path);
-
+    
     char cover_path[MAX_LEN];
     sprintf(cover_path, "%s/%s.jpg", cover_location, cover_name);
     
     FILE* ptr = fopen(cover_path, "r");
     if(ptr == NULL)
     {
-        snprintf(cmd, sizeof(cmd), "ffmpeg -i %s/%s -an -vcodec copy \"%s\"", playlist_path, song_path, cover_path);
+        char* linux_formatted_song_path = linux_formatted_filename(song_path);
+        snprintf(cmd, sizeof(cmd), "ffmpeg -i %s/%s -an -vcodec copy \"%s\"", playlist_path, linux_formatted_song_path, cover_path);
         system(cmd);
+        free(linux_formatted_song_path);
     }
     else
     {

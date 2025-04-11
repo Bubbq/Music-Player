@@ -297,7 +297,7 @@ bool loadMusic(Music& music, Image& img, Texture2D& cover, Texture2D& background
 int main()
 {
    // disables the info upon execution
-   SetTraceLogLevel(LOG_ERROR);
+//    SetTraceLogLevel(LOG_ERROR);
   
    // init
    SetTargetFPS(60);

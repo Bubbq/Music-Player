@@ -12,6 +12,13 @@ void get_full_song_path(char* dst, char* playlist_path, char* song_path)
     free(playlist);
 }
 
+void get_cover_path(char cover_path[MAX_LEN], char* song_path, const char* cover_location)
+{
+    char* cover_name = format_as_display(song_path);
+    sprintf(cover_path, "%s/%s.png", cover_location, cover_name);
+    free(cover_name);
+} 
+
 char* format_as_display(char* file_path)
 {
     char* result = malloc(sizeof(char) * strlen(file_path) + 1);
@@ -53,9 +60,7 @@ char* linux_formatted_filename(const char* file_path)
         }
 
         else
-        {
             linux_file_path[length++] = file_path[i];
-        }
     }
     linux_file_path[length] = '\0';
     linux_file_path = realloc(linux_file_path, sizeof(char) * (length + 1));
@@ -101,12 +106,9 @@ void extract_song_cover(const char* playlist_path, char* song_path, const char* 
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "mkdir %s", cover_location);
     system(cmd);
-
-    char* cover_name = format_as_display(song_path);
     
     char cover_path[MAX_LEN];
-    sprintf(cover_path, "%s/%s.jpg", cover_location, cover_name);
-    
+    get_cover_path(cover_path, song_path, cover_location);
     FILE* ptr = fopen(cover_path, "r");
     if(ptr == NULL)
     {
@@ -116,8 +118,5 @@ void extract_song_cover(const char* playlist_path, char* song_path, const char* 
         free(linux_formatted_song_path);
     }
     else
-    {
         fclose(ptr);
-    }
-    free(cover_name);
 }

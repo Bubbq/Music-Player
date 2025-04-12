@@ -1,3 +1,4 @@
+#include "headers/raylib.h"
 #include <fstream>
 #include <raylib.h>
 #include <iostream>
@@ -298,7 +299,7 @@ int main()
 {
    // disables the info upon execution
 //    SetTraceLogLevel(LOG_ERROR);
-  
+  SetConfigFlags(FLAG_WINDOW_RESIZABLE);
    // init
    SetTargetFPS(60);
    InitWindow(WINDOW_SIZE, WINDOW_SIZE, "Music Player");
@@ -355,7 +356,6 @@ int main()
    {
        // start rendering
        BeginDrawing();
-
        // making cover and background image
        if(cover.id != 0 && background.id != 0)
 	   {
@@ -475,6 +475,7 @@ int main()
 		}
 
 		ClearBackground(BLANK);
+		DrawFPS(0, 0);
 
 		EndDrawing();
    }

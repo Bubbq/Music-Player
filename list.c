@@ -77,7 +77,6 @@ void free_list(list *list)
         for(int i = 0; i < list->size; i++)
         {
             playlist* ptr = (playlist*)list->elements + i;
-            free(ptr->path);
             free_list(&ptr->song_paths);
         }
     }    

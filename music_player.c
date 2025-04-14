@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define RAYGUI_IMPLEMENTATION
+#include "headers/raygui.h"
+
 #define MAX_LEN 128
 #define NSONGS 100
 #define NPLAYLIST 100
@@ -159,10 +162,73 @@ void save_music(char* playlist_path, char* song_path, float pitch)
     fclose(ptr);
 }
 
+bool rewind_button(Music* music)
+{
+    const char* button_text = "PREV";
+    const Rectangle button_border = {125, 500, 75, 30};
+
+    if(GuiButton(button_border,button_text) || IsKeyPressed(KEY_A))
+    {
+        if(GetMusicTimePlayed(*music) > 3)
+            SeekMusicStream(*music, 0.05);
+        else
+            return true;
+    }
+
+    return false;
+}
+
+void pause_button(Music* music, bool* play_music)
+{
+    const char* button_text = (*play_music) ? "PAUSE" : "PLAY";
+    const Rectangle button_border = {200, 500, 75, 30};
+    
+    if(GuiButton(button_border, button_text) || IsKeyPressed(KEY_SPACE))
+    {
+        *play_music = !(*play_music);
+        if(*play_music)
+            PlayMusicStream(*music);
+        else
+            PauseMusicStream(*music);
+    }
+}
+
+bool skip_button(Music* music, bool play_music)
+{
+    const char* button_text = "SKIP";
+    const Rectangle button_border = {275, 500, 75, 30};
+    
+    if(GuiButton(button_border, button_text) || IsKeyPressed(KEY_D) || (!IsMusicStreamPlaying(*music) && play_music))
+                return true;
+    else 
+        return false;
+}
+
+void progress_bar(float* percentage_played, bool* update_position)
+{
+    const Rectangle bar = {200, 400, 200, 10};
+    DrawRectangleRec(bar, RED);
+    
+    Vector2 mouse_position = GetMousePosition();
+    if(CheckCollisionPointRec(mouse_position, bar) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    {
+        *percentage_played = (mouse_position.x - bar.x) / bar.width;
+        *update_position = true;
+    }
+    DrawRectangle(200, 400, (200 * (*percentage_played)), 10, GREEN);
+}
+
+
+// TODO: 
+// add default images
+// handle edge cases (file not mp3 etc)
+// fix low frames on initialization
+
 int main()
 {
+    bool skip_song = false;
+    bool rewind_song = false;
     float pitch = 1.00;
-    bool update_song = false;
     bool play_music = false;
     int song_index = 0;
     int playlist_index = 1;
@@ -196,6 +262,7 @@ int main()
     // SetTraceLogLevel(LOG_ERROR);
     InitAudioDevice();
     SetTargetFPS(60);
+    
     FILE* cover_directory = fopen(MP3_COVER_PATH, "r");
     if(cover_directory == NULL)
         create_cover_directory(MP3_COVER_PATH);
@@ -233,21 +300,37 @@ int main()
             SeekMusicStream(music, GetMusicTimeLength(music) * percentage_played);
         }
 
-        if(update_song)
+        percentage_played = GetMusicTimePlayed(music) / GetMusicTimeLength(music);
+        
+        // update enviornment
+        if(skip_song || rewind_song)
         {
-            update_song = false;
-            
-            if(is_mp3(full_song_path))
+            if(skip_song)
             {
-                strcpy(current_song, songs[song_index]);
+                skip_song = false;
+                song_index = adjust_index((song_index + 1), songs_read);
+            }
 
+            else if(rewind_song)
+            {
+                rewind_song = false;
+                song_index = adjust_index((song_index - 1), songs_read);
+            }
+
+            strcpy(current_song, songs[song_index]);
+            
+            if(is_mp3(current_song))
+            {
+                // get display name
                 strcpy(display_name, current_song);
                 remove_escape_sequence(display_name);
                 remove_extension(display_name);
 
+                // update full song path
                 snprintf(full_song_path, (MAX_LEN * 3), "%s/%s/%s", PLAYLIST_DIR, current_playlist, current_song);
                 remove_escape_sequence(full_song_path);
                 
+                // update music stream
                 if(IsMusicReady(music))
                     UnloadMusicStream(music);
                 music = LoadMusicStream(full_song_path);
@@ -255,61 +338,34 @@ int main()
                 PlayMusicStream(music);
                 SetMusicPitch(music, pitch);
                 
+                // change cover art
                 update_cover_art(&image, &song_cover, current_playlist, current_song);
             }
+
             else
             {
                 printf("%s is not a mp3\n", current_song);
                 return 1;
             }
         }
-        percentage_played = GetMusicTimePlayed(music) / GetMusicTimeLength(music);
 
-        // play pause
-        if(IsKeyPressed(KEY_SPACE))
-        {
-            play_music = !play_music;
-            if(play_music)
-                PlayMusicStream(music);
-            else
-                PauseMusicStream(music);
-        }
-
-        // skip 
-        if(IsKeyPressed(KEY_D) || (!IsMusicStreamPlaying(music) && play_music))
-        {
-            song_index = adjust_index((song_index + 1), songs_read);
-            update_song = true;
-        }
-
-        // rewind 
-        if(IsKeyPressed(KEY_A))
-        {
-            if(GetMusicTimePlayed(music) > 3)
-                SeekMusicStream(music, 0.25);
-            else
-            {
-                song_index = adjust_index((song_index - 1), songs_read);
-                update_song = true;
-            }
-        }
         UpdateMusicStream(music);
+        
         BeginDrawing();
             ClearBackground(RAYWHITE);
             DrawFPS(500,500);
+
             if(song_cover.id)
                 DrawTexture(song_cover, 0, 0, RAYWHITE);
 
-            // play pause button
-            Rectangle bar = {200, 400, 200, 10};
-            DrawRectangleRec(bar, RED);
-            Vector2 mouse_position = GetMousePosition();
-            if(CheckCollisionPointRec(mouse_position, bar) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-            {
-                percentage_played = (mouse_position.x - bar.x) / bar.width;
-                update_position = true;
-            }
-            DrawRectangle(200, 400, 200 * percentage_played, 10, GREEN);
+            skip_song = skip_button(&music, play_music);
+            pause_button(&music, &play_music);
+            rewind_song = rewind_button(&music);
+
+            // shows how much song is played
+            progress_bar(&percentage_played, &update_position);
+
+            // displaying current song name
             DrawText(display_name, 300, 300, 20, BLACK);
         EndDrawing();
     }

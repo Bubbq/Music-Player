@@ -1,5 +1,5 @@
-#include "stdio.h"
 #include "headers/raylib.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -132,7 +132,8 @@ void update_display_name(char* dst, const char* str)
 void extract_song_cover(const char* cover_path, const char* music_root, const char* playlist_path, const char* song_path)
 {
     char command[MAX_LEN * 4];
-    snprintf(command, MAX_LEN * 4, "ffmpeg -i %s/%s/%s -vf scale=250:-1 \"%s\" -loglevel error", music_root, playlist_path, song_path, cover_path);
+    // snprintf(command, MAX_LEN * 4, "ffmpeg -i %s/%s/%s -vf scale=250:-1 \"%s\" -loglevel error", music_root, playlist_path, song_path, cover_path);
+    snprintf(command, MAX_LEN * 4, "ffmpeg -i %s/%s/%s \"%s\" -loglevel error", music_root, playlist_path, song_path, cover_path);
     system(command);
 }
 
@@ -287,6 +288,28 @@ void update_time_display(char* time_played, int music_played, char* time_left, i
     sprintf(time_left, "%2d:%02d", minutes_left, seconds_left);
 }
 
+void resize_stack(int** stack, size_t* size)
+{
+    (*size) *= 2;
+    *stack = realloc(*stack, *size);
+}
+
+void add_stack_element(int** stack, int* ptr, size_t* size, int element)
+{
+    if(((*ptr) + 1) * sizeof(int) == *size)   
+        resize_stack(stack, size);
+    else
+        (*stack)[++(*ptr)] = element;
+}
+
+int pop_stack(int* stack, int* ptr)
+{
+    if((*ptr) >= 0)
+        return stack[(*ptr)--];
+    else
+        return -1;
+}
+
 // TODO: 
 // add shuffle
 // add default images
@@ -294,6 +317,7 @@ void update_time_display(char* time_played, int music_played, char* time_left, i
 
 int main()
 {
+    bool disable_skip_button = false;
     bool holding_progress_bar = false;
     bool play_music = false;
     bool shuffle = false;
@@ -306,7 +330,7 @@ int main()
     float percentage_played = 0.00;
     
     int song_index = 0;
-    int playlist_index = 2;
+    int playlist_index = 0;
 
     char playlists[NPLAYLIST][MAX_LEN];
     char current_playlist[MAX_LEN];
@@ -326,10 +350,13 @@ int main()
     char playlist_path[MAX_LEN * 2];
     snprintf(playlist_path, MAX_LEN * 2, "%s/%s", PLAYLIST_DIR, playlists[playlist_index]);
     int songs_read = get_files_from_folder(MAX_LEN, NSONGS, songs, playlist_path);
+    
+    int ptr = -1;
+    size_t stack_size = sizeof(int) * songs_read;
+    int* song_history = malloc(stack_size);
 
     strcpy(current_playlist, playlists[playlist_index]);
     strcpy(current_song, songs[song_index]);
-
 
     char full_song_path[MAX_LEN * 3];
     snprintf(full_song_path, (MAX_LEN * 3), "%s/%s/%s", PLAYLIST_DIR, current_playlist, current_song);
@@ -337,7 +364,7 @@ int main()
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(750, 750, "music player");
-    // SetTraceLogLevel(LOG_ERROR);
+    SetTraceLogLevel(LOG_ERROR);
     InitAudioDevice();
     SetTargetFPS(60);
     
@@ -360,11 +387,20 @@ int main()
         int music_left = GetMusicTimeLength(music) - music_played;
         update_time_display(time_played, music_played, time_left, music_left);
 
+        // disable_skip_button = (shuffle && ptr < 0 && music_played < 3);  
+
         if(set_pitch(&pitch))
             SetMusicPitch(music, pitch);
         
         if(IsKeyPressed(KEY_X))
+        {
             shuffle = !shuffle;
+            if(shuffle)
+                add_stack_element(&song_history, &ptr, &stack_size, song_index);
+            // clearing shuffle history
+            else
+                ptr = -1;
+        }
 
         if(update_position)
         {
@@ -393,6 +429,7 @@ int main()
                 skip_song = false;
                 if(shuffle)
                 {
+                    add_stack_element(&song_history, &ptr, &stack_size, song_index);
                     int rand;
                     while((rand = GetRandomValue(0, songs_read - 1)) == song_index)
                         ;
@@ -405,7 +442,14 @@ int main()
             else if(rewind_song)
             {
                 rewind_song = false;
-                song_index = adjust_index((song_index - 1), songs_read);
+                if(shuffle)
+                {
+                    int last_song = pop_stack(song_history, &ptr);
+                    if(last_song >= 0)
+                        song_index = last_song;
+                }
+                else
+                    song_index = adjust_index((song_index - 1), songs_read);
             }
 
             strcpy(current_song, songs[song_index]);
@@ -431,7 +475,6 @@ int main()
             UpdateMusicStream(music);
         percentage_played = GetMusicTimePlayed(music) / GetMusicTimeLength(music);
         
-
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
@@ -443,7 +486,12 @@ int main()
                 DrawText("SHUFFLE", 650, 700, 20, BLACK);
             skip_button(&skip_song, (!IsMusicStreamPlaying(music) && play_music), holding_progress_bar);
             pause_button( &play_music, holding_progress_bar);
+           
+            if(disable_skip_button)
+                GuiSetState(STATE_DISABLED);
             rewind_button(GetMusicTimePlayed(music), &rewind_song, &restart_song, holding_progress_bar);
+            GuiSetState(STATE_NORMAL);
+           
             DrawText(time_played, 150, 400, 17, BLACK);
             progress_bar(&percentage_played, &update_position, &holding_progress_bar);
             DrawText(time_left, 400, 400, 17, BLACK);
@@ -452,6 +500,7 @@ int main()
         EndDrawing();
     }
 
+    free(song_history);
     save_music(current_playlist, current_song, pitch);
     if(song_cover.id)
         UnloadTexture(song_cover);

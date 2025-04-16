@@ -1,6 +1,5 @@
 #include "stdio.h"
 #include "headers/raylib.h"
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -180,21 +179,21 @@ void save_music(char* playlist_path, char* song_path, float pitch)
     }
 }
 
-void rewind_button(Music* music, bool* rewind_song, bool* restart_song, bool holding_progress_bar)
+void rewind_button(float time_played, bool* rewind_song, bool* restart_song, bool holding_progress_bar)
 {
     const char* button_text = "PREV";
     const Rectangle button_border = {125, 500, 75, 30};
 
     if((GuiButton(button_border,button_text) && !holding_progress_bar)|| IsKeyPressed(KEY_A))
     {
-        if(GetMusicTimePlayed(*music) > 3.00)
+        if(time_played > 3.00)
             *restart_song = true;
         else
             *rewind_song = true;
     }
 }
 
-void pause_button(Music* music, bool* play_music, bool holding_progress_bar)
+void pause_button(bool* play_music, bool holding_progress_bar)
 {
     const char* button_text = (*play_music) ? "PAUSE" : "PLAY";
     const Rectangle button_border = {200, 500, 75, 30};
@@ -203,12 +202,10 @@ void pause_button(Music* music, bool* play_music, bool holding_progress_bar)
         *play_music = !(*play_music);
 }
 
-void skip_button(bool* skip_song, bool is_music_playing, bool play_music, bool holding_progress_bar)
+void skip_button(bool* skip_song, bool song_over, bool holding_progress_bar)
 {
     const char* button_text = "SKIP";
     const Rectangle button_border = {275, 500, 75, 30};
-
-    bool song_over = !is_music_playing && play_music;
 
     if((GuiButton(button_border, button_text) && !holding_progress_bar) || IsKeyPressed(KEY_D) || song_over)
         *skip_song = true;
@@ -224,8 +221,8 @@ void progress_bar(float* percentage_played, bool* update_position, bool* holding
         if(IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
             *holding_progress_bar = true;
-            *percentage_played = (mouse_position.x - BAR.x) / BAR.width;
 
+            *percentage_played = (mouse_position.x - BAR.x) / BAR.width;
             if(*percentage_played < 0.00)
                 *percentage_played = 0.00;
             else if(*percentage_played > 1.00)
@@ -236,8 +233,8 @@ void progress_bar(float* percentage_played, bool* update_position, bool* holding
         {
             *update_position = true;
             *holding_progress_bar = false;
-            *percentage_played = (mouse_position.x - BAR.x) / BAR.width;
 
+            *percentage_played = (mouse_position.x - BAR.x) / BAR.width;
             if(*percentage_played < 0.00)
                 *percentage_played = 0.00;
             else if(*percentage_played > 1.00)
@@ -265,7 +262,8 @@ bool set_pitch(float* pitch)
         return true;
     }
 
-    return false;
+    else
+        return false;
 }
 
 void update_music_stream(Music* music, const char* full_song_path, float pitch)
@@ -278,11 +276,21 @@ void update_music_stream(Music* music, const char* full_song_path, float pitch)
     PlayMusicStream(*music);
 }
 
+void update_time_display(char* time_played, int music_played, char* time_left, int music_left)
+{
+    int minutes_played = music_played / 60;
+    int seconds_played = music_played % 60;
+    int minutes_left = music_left / 60;
+    int seconds_left = music_left % 60;
+
+    sprintf(time_played, "%2d:%02d", minutes_played, seconds_played);
+    sprintf(time_left, "%2d:%02d", minutes_left, seconds_left);
+}
+
 // TODO: 
 // add shuffle
 // add default images
 // handle edge cases (file not mp3 etc)
-// fix low frames on initialization
 
 int main()
 {
@@ -297,8 +305,8 @@ int main()
     float pitch = 1.00;
     float percentage_played = 0.00;
     
-    int song_index, playlist_index;
-    playlist_index = song_index = 0;
+    int song_index = 0;
+    int playlist_index = 2;
 
     char playlists[NPLAYLIST][MAX_LEN];
     char current_playlist[MAX_LEN];
@@ -306,6 +314,9 @@ int main()
     char current_song[MAX_LEN];
     char songs[NSONGS][MAX_LEN];
     char display_name[MAX_LEN];
+
+    char time_played[MAX_LEN];
+    char time_left[MAX_LEN];
 
     Music music = {0};
     Texture2D song_cover = {0};
@@ -316,9 +327,9 @@ int main()
     snprintf(playlist_path, MAX_LEN * 2, "%s/%s", PLAYLIST_DIR, playlists[playlist_index]);
     int songs_read = get_files_from_folder(MAX_LEN, NSONGS, songs, playlist_path);
 
-    sprintf(current_playlist, "%s", playlists[playlist_index]);
+    strcpy(current_playlist, playlists[playlist_index]);
+    strcpy(current_song, songs[song_index]);
 
-    sprintf(current_song, "%s", songs[song_index]);
 
     char full_song_path[MAX_LEN * 3];
     snprintf(full_song_path, (MAX_LEN * 3), "%s/%s/%s", PLAYLIST_DIR, current_playlist, current_song);
@@ -326,7 +337,7 @@ int main()
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(750, 750, "music player");
-    SetTraceLogLevel(LOG_ERROR);
+    // SetTraceLogLevel(LOG_ERROR);
     InitAudioDevice();
     SetTargetFPS(60);
     
@@ -345,6 +356,10 @@ int main()
     
     while(!WindowShouldClose())
     {
+        int music_played = holding_progress_bar ? (GetMusicTimeLength(music) * percentage_played) : GetMusicTimePlayed(music);
+        int music_left = GetMusicTimeLength(music) - music_played;
+        update_time_display(time_played, music_played, time_left, music_left);
+
         if(set_pitch(&pitch))
             SetMusicPitch(music, pitch);
         
@@ -420,16 +435,18 @@ int main()
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
-            if(background.id)
-                DrawTexture(background, 0, 0, RAYWHITE);
+            // if(background.id)
+            //     DrawTexture(background, 0, 0, RAYWHITE);
             if(song_cover.id)
                 DrawTexture(song_cover, 0, 0, RAYWHITE);
             if(shuffle)
                 DrawText("SHUFFLE", 650, 700, 20, BLACK);
-            skip_button(&skip_song, IsMusicStreamPlaying(music), play_music, holding_progress_bar);
-            pause_button(&music, &play_music, holding_progress_bar);
-            rewind_button(&music, &rewind_song, &restart_song, holding_progress_bar);
+            skip_button(&skip_song, (!IsMusicStreamPlaying(music) && play_music), holding_progress_bar);
+            pause_button( &play_music, holding_progress_bar);
+            rewind_button(GetMusicTimePlayed(music), &rewind_song, &restart_song, holding_progress_bar);
+            DrawText(time_played, 150, 400, 17, BLACK);
             progress_bar(&percentage_played, &update_position, &holding_progress_bar);
+            DrawText(time_left, 400, 400, 17, BLACK);
             DrawText(display_name, 300, 300, 20, BLACK);
             DrawFPS(500,500);
         EndDrawing();

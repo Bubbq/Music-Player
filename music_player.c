@@ -1,7 +1,8 @@
 #include "headers/raylib.h"
-#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "time.h"
 
 #define RAYGUI_IMPLEMENTATION
 #include "headers/raygui.h"
@@ -86,7 +87,7 @@ int get_files_from_folder(int nchars, int nfiles, char files[][nchars], const ch
 void print_list(int nchars, int nfiles, char files[][nchars])
 {
     for(int i = 0; i < nfiles; i++)
-        printf("%d) %s\n", (i + 1), files[i]);
+        printf("%d) %s\n", (i), files[i]);
 }
 
 bool is_mp3(const char* file_path)
@@ -288,16 +289,16 @@ void update_time_display(char* time_played, int music_played, char* time_left, i
     sprintf(time_left, "%2d:%02d", minutes_left, seconds_left);
 }
 
-void resize_stack(int** stack, size_t* size)
+void resize_stack(int** stack, size_t* stack_size)
 {
-    (*size) *= 2;
-    *stack = realloc(*stack, *size);
+    (*stack_size) *= 2;
+    *stack = realloc(*stack, *stack_size);
 }
 
-void add_stack_element(int** stack, int* ptr, size_t* size, int element)
+void add_stack_element(int** stack, int* ptr, size_t* stack_size, int element)
 {
-    if(((*ptr) + 1) * sizeof(int) == *size)   
-        resize_stack(stack, size);
+    if(((*ptr) + 1) * sizeof(int) == *stack_size)   
+        resize_stack(stack, stack_size);
     else
         (*stack)[++(*ptr)] = element;
 }
@@ -310,6 +311,25 @@ int pop_stack(int* stack, int* ptr)
         return -1;
 }
 
+void create_song_queue(int nsongs, int current_song, int queue[nsongs])
+{
+    for(int i = 0; i < nsongs; i++)
+        if(i < current_song)
+            queue[i] = i;
+        else
+            queue[i] = i + 1;
+
+    srand(time(NULL));
+    for (int i = nsongs - 1; i > 0; i--)
+    {
+        int j = rand() % (i + 1);
+
+        int temp = queue[i];
+        queue[i] = queue[j];
+        queue[j] = temp;
+    }
+}
+
 // TODO: 
 // add shuffle
 // add default images
@@ -317,7 +337,6 @@ int pop_stack(int* stack, int* ptr)
 
 int main()
 {
-    bool disable_skip_button = false;
     bool holding_progress_bar = false;
     bool play_music = false;
     bool shuffle = false;
@@ -330,7 +349,7 @@ int main()
     float percentage_played = 0.00;
     
     int song_index = 0;
-    int playlist_index = 0;
+    int playlist_index = 1;
 
     char playlists[NPLAYLIST][MAX_LEN];
     char current_playlist[MAX_LEN];
@@ -350,11 +369,14 @@ int main()
     char playlist_path[MAX_LEN * 2];
     snprintf(playlist_path, MAX_LEN * 2, "%s/%s", PLAYLIST_DIR, playlists[playlist_index]);
     int songs_read = get_files_from_folder(MAX_LEN, NSONGS, songs, playlist_path);
-    
-    int ptr = -1;
+    print_list(MAX_LEN, songs_read, songs);
+    int stack_ptr = -1;
     size_t stack_size = sizeof(int) * songs_read;
     int* song_history = malloc(stack_size);
-
+    
+    int song_queue[songs_read - 1];
+    int queue_ptr = 0;
+    
     strcpy(current_playlist, playlists[playlist_index]);
     strcpy(current_song, songs[song_index]);
 
@@ -365,6 +387,7 @@ int main()
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(750, 750, "music player");
     SetTraceLogLevel(LOG_ERROR);
+    SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
     InitAudioDevice();
     SetTargetFPS(60);
     
@@ -387,8 +410,6 @@ int main()
         int music_left = GetMusicTimeLength(music) - music_played;
         update_time_display(time_played, music_played, time_left, music_left);
 
-        // disable_skip_button = (shuffle && ptr < 0 && music_played < 3);  
-
         if(set_pitch(&pitch))
             SetMusicPitch(music, pitch);
         
@@ -396,10 +417,13 @@ int main()
         {
             shuffle = !shuffle;
             if(shuffle)
-                add_stack_element(&song_history, &ptr, &stack_size, song_index);
-            // clearing shuffle history
+            {
+                queue_ptr = 0;
+                create_song_queue((songs_read - 1), song_index, song_queue);
+                add_stack_element(&song_history, &stack_ptr, &stack_size, song_index);
+            }
             else
-                ptr = -1;
+                stack_ptr = -1;
         }
 
         if(update_position)
@@ -420,7 +444,6 @@ int main()
             StopMusicStream(music);
             PlayMusicStream(music);
         }
-
         // update enviornment
         if(skip_song || rewind_song)
         {
@@ -429,11 +452,16 @@ int main()
                 skip_song = false;
                 if(shuffle)
                 {
-                    add_stack_element(&song_history, &ptr, &stack_size, song_index);
-                    int rand;
-                    while((rand = GetRandomValue(0, songs_read - 1)) == song_index)
-                        ;
-                    song_index = rand;
+                    add_stack_element(&song_history, &stack_ptr, &stack_size, song_index);
+                    if(queue_ptr >= songs_read - 1)
+                    {
+                        queue_ptr = 0;
+                        stack_ptr = -1;
+                        create_song_queue((songs_read - 1), song_index, song_queue);
+                    }
+
+                    song_index = song_queue[queue_ptr++];
+                    
                 }
                 else
                     song_index = adjust_index((song_index + 1), songs_read);
@@ -444,7 +472,10 @@ int main()
                 rewind_song = false;
                 if(shuffle)
                 {
-                    int last_song = pop_stack(song_history, &ptr);
+                    if(queue_ptr > 0)
+                        queue_ptr--;
+
+                    int last_song = pop_stack(song_history, &stack_ptr);
                     if(last_song >= 0)
                         song_index = last_song;
                 }
@@ -487,11 +518,7 @@ int main()
             skip_button(&skip_song, (!IsMusicStreamPlaying(music) && play_music), holding_progress_bar);
             pause_button( &play_music, holding_progress_bar);
            
-            if(disable_skip_button)
-                GuiSetState(STATE_DISABLED);
             rewind_button(GetMusicTimePlayed(music), &rewind_song, &restart_song, holding_progress_bar);
-            GuiSetState(STATE_NORMAL);
-           
             DrawText(time_played, 150, 400, 17, BLACK);
             progress_bar(&percentage_played, &update_position, &holding_progress_bar);
             DrawText(time_left, 400, 400, 17, BLACK);

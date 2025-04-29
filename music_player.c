@@ -1,11 +1,14 @@
 #include "headers/raylib.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include "time.h"
-
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>  
 #define RAYGUI_IMPLEMENTATION
 #include "headers/raygui.h"
+
+#include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
+#include <libavutil/dict.h>
 
 #define MAX_LEN 128
 #define NSONGS 100
@@ -15,51 +18,50 @@ const char* MUSIC_SAVE = "saved_music.txt";
 const char* PLAYLIST_DIR = "/home/bubbq/Music"; 
 const char* MP3_COVER_PATH = "/home/bubbq/.cache/mp3_covers"; 
 
-void remove_escape_sequence(char* str)
+void remove_character_from_string(char* string, const char target)
 {
-    char* dst = str;
-    char* src = str;
-    while(*src != '\0')
-    {
-        if(*src != '\\')
-        {
-            *dst = *src;
-            dst++;
-        }
-        src++;
-    }    
+    int k = 0;
 
-    *dst = '\0';
+    for(int i = 0; i < strlen(string); i++)
+        if(string[i] != target)
+            string[k++] = string[i];
+
+    string[k] = '\0';
 }
 
-void linux_formatted_filename(char* destination, const char* original_path)
+void linux_formatted_filename(int max_string_length, char* destination, const char* original_path)
 {
+    // characters in linux that need escape sequences and their corresponding replacement
     const char* INVALID = " ()&'`\\!";  
-    const char* replacement_characters[] = {
-        "\\ ", "\\(", "\\)", "\\&", "\\'", "\\`", "\\\\", "\\!" 
-    };
+    const char* replacement_characters[] = { "\\ ", "\\(", "\\)", "\\&", "\\'", "\\`", "\\\\", "\\!" };
 
     int length = 0;
-    for(int i = 0; i < strlen(original_path); i++)
-    {
-        char character = original_path[i];
-        // find next invalid character
-        char* found = strchr(INVALID, character);
+    int n_characters = strlen(original_path);
 
-        // replace char with linux escape sequence
+    for(int i = 0; i < n_characters; i++)
+    {
+        // find next invalid character
+        const char* found = strchr(INVALID, original_path[i]);
+
+        // replace invalid character with linux escape sequence
         if(found != NULL)
         {
             int replacement_index = found - INVALID;
             const char* replacement = replacement_characters[replacement_index];
-            int characters_written = snprintf(destination + length, MAX_LEN - length, "%s", replacement);
-            
-            if(characters_written >= MAX_LEN - length)
-                characters_written = MAX_LEN - length - 1;
-            length += characters_written;
+            int replacement_length = strlen(replacement);
+
+            if(length + replacement_length < max_string_length)
+            {
+                strcpy(destination + length, replacement);
+                length += replacement_length;
+            }
+
+            else
+                break;
         }
 
         else
-            destination[length++] = character;
+            destination[length++] = original_path[i];
     }
 
     destination[length] = '\0';
@@ -69,32 +71,37 @@ int get_files_from_folder(int nchars, int nfiles, char files[][nchars], const ch
 {
     char command[nchars];
     sprintf(command, "cd %s; ls -1", folder_path);
+
     FILE* output_stream = popen(command, "r");
    
     int files_read = 0;
     char buffer[nchars];
-    while((fgets(buffer, nchars, output_stream) != NULL) && (files_read < nfiles))
+
+    for(; (fgets(buffer, nchars, output_stream) != NULL) && (files_read < nfiles); files_read++)
     {
-        int newline_position = strlen(buffer) - 1;
-        buffer[newline_position] = '\0';
-        linux_formatted_filename(files[files_read++], buffer);
+        buffer[strlen(buffer) - 1] = '\0';
+        linux_formatted_filename(nchars, files[files_read], buffer);
     }
-    
+
     pclose(output_stream);
+
     return files_read;
 }
 
-void print_list(int nchars, int nfiles, char files[][nchars])
+int is_extension(const char* file, const char* extension)
 {
-    for(int i = 0; i < nfiles; i++)
-        printf("%d) %s\n", (i), files[i]);
+    char* file_extension = strrchr(file, '.');
+
+    return (strcmp(file_extension, extension) == 0);
 }
 
-bool is_mp3(const char* file_path)
+void remove_extension(char* file_path)
 {
-    const char* MP3 = ".mp3";
-    char* file_extension = strrchr(file_path, '.');
-    return (strcmp(file_extension, MP3) == 0);
+    char* extension = strrchr(file_path, '.');
+    if(file_path != NULL)
+        file_path[extension - file_path] = '\0';
+    else
+        printf("\"%s\" was not an extension thus it couldn't be removed\n", file_path);
 }
 
 int adjust_index(int index, int size)
@@ -102,79 +109,65 @@ int adjust_index(int index, int size)
     return (index + size) % size;
 } 
 
-void remove_extension(char* str)
+void make_directory(const char* directory_path)
 {
-    char* found = strrchr(str, '.');
-    if(found != NULL)
-        str[found - str] = '\0';
+    if((mkdir(directory_path, 0755)) == -1)
+        printf("there was an error making the directory: \"%s\"\n", directory_path);
 }
 
-void create_cover_directory(const char* cover_location)
+void update_cover_path(char* cover_path, const char* cover_root, const char* song_path)
 {
-    char command[MAX_LEN];
-    sprintf(command, "mkdir %s", cover_location);
+    sprintf(cover_path, "%s/%s", cover_root, song_path);
+    remove_extension(cover_path);
+
+    int length = strlen(cover_path);
+    const char* extension = ".jpg";
+
+    sprintf(cover_path + length, "%s", extension);
+    length += strlen(extension);
+    
+    cover_path[length] = '\0';
+}
+
+void extract_song_cover(const char* cover_path, const char* full_song_path)
+{
+    char command[MAX_LEN * 2];
+    sprintf(command, "ffmpeg -i %s -vf scale=250:-1 \"%s\" -loglevel error", full_song_path, cover_path);
+
     system(command);
 }
 
-void update_cover_path(char* dst, const char* cover_root, const char* song_path)
+void update_cover_art(Texture2D* background, Texture2D* song_cover, const char* cover_path, const char* full_song_path)
 {
-    snprintf(dst, (MAX_LEN * 2), "%s/%s", cover_root, song_path);
-    remove_extension(dst);
-    sprintf(dst + strlen(dst), ".jpg");
-}
-
-void update_display_name(char* dst, const char* str)
-{
-    strcpy(dst, str);
-    remove_escape_sequence(dst);
-    remove_extension(dst);
-}
-
-void extract_song_cover(const char* cover_path, const char* music_root, const char* playlist_path, const char* song_path)
-{
-    char command[MAX_LEN * 4];
-    // snprintf(command, MAX_LEN * 4, "ffmpeg -i %s/%s/%s -vf scale=250:-1 \"%s\" -loglevel error", music_root, playlist_path, song_path, cover_path);
-    snprintf(command, MAX_LEN * 4, "ffmpeg -i %s/%s/%s \"%s\" -loglevel error", music_root, playlist_path, song_path, cover_path);
-    system(command);
-}
-
-void update_cover_art(Texture2D* background, Texture2D* song_cover, const char* current_playlist, const char* current_song)
-{
-    char cover_path[MAX_LEN * 2];
-    update_cover_path(cover_path, MP3_COVER_PATH, current_song);
-   
     FILE* cover = fopen(cover_path, "r");
+
     if(cover == NULL)
-        extract_song_cover(cover_path, PLAYLIST_DIR, current_playlist, current_song);
+        extract_song_cover(cover_path,full_song_path);
     else
         fclose(cover);
 
     if(song_cover->id)
         UnloadTexture(*song_cover);
+
     if(background->id)
         UnloadTexture(*background);
 
-    Image song_cover_image = LoadImage(cover_path);
-    *song_cover = LoadTextureFromImage(song_cover_image);
+    int default_used = 0;
+    *song_cover = LoadTexture(cover_path);
 
-    // Image background_image = LoadImage(cover_path);
-    // ImageResize(&background_image, GetScreenWidth(), GetScreenHeight());
-    // ImageBlurGaussian(&background_image, 10);
-    // *background = LoadTextureFromImage(background_image);
+    if(!song_cover->id)
+    {
+        default_used = 1;
+        *song_cover = LoadTexture("default.png");
+    }
 
-    if(song_cover_image.data)
-        UnloadImage(song_cover_image);
-    // if(background_image.data)
-    //     UnloadImage(background_image); 
+    song_cover->width = song_cover->height = 250;
 }
 
 void save_music(char* playlist_path, char* song_path, float pitch)
 {
     FILE* ptr = fopen(MUSIC_SAVE, "w");
-    if(ptr == NULL)
-        return;
-    
-    else
+    if(ptr != NULL)
     {
         fprintf(ptr, "%s\n%s\n%f", playlist_path, song_path, pitch);
         fclose(ptr);
@@ -268,10 +261,11 @@ bool set_pitch(float* pitch)
         return false;
 }
 
-void update_music_stream(Music* music, const char* full_song_path, float pitch)
+void update_music_stream(Music* music, char* full_song_path, float pitch)
 {
     if(IsMusicReady(*music))
         UnloadMusicStream(*music);
+
     *music = LoadMusicStream(full_song_path);
     music->looping = false;
     SetMusicPitch(*music, pitch);
@@ -289,54 +283,93 @@ void update_time_display(char* time_played, int music_played, char* time_left, i
     sprintf(time_left, "%2d:%02d", minutes_left, seconds_left);
 }
 
-void resize_stack(int** stack, size_t* stack_size)
+void add_stack_element(int element, int nelements, int stack[nelements], int* ptr)
 {
-    (*stack_size) *= 2;
-    *stack = realloc(*stack, *stack_size);
-}
+    if((*ptr) < nelements)
+        stack[++(*ptr)] = element;
+}   
 
-void add_stack_element(int** stack, int* ptr, size_t* stack_size, int element)
+int pop_stack(int nelements, int stack[nelements], int* ptr)
 {
-    if(((*ptr) + 1) * sizeof(int) == *stack_size)   
-        resize_stack(stack, stack_size);
-    else
-        (*stack)[++(*ptr)] = element;
-}
-
-int pop_stack(int* stack, int* ptr)
-{
-    if((*ptr) >= 0)
+    if(*ptr >= 0)
         return stack[(*ptr)--];
     else
         return -1;
 }
 
+void shuffle_array(int size, int array[])
+{
+    for (int i = size - 1; i > 0; i--)
+    {
+        int j = rand() % (i + 1);
+
+        int temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
+}
+
 void create_song_queue(int nsongs, int current_song, int queue[nsongs])
 {
+    // create an array of elements not including the current song
     for(int i = 0; i < nsongs; i++)
         if(i < current_song)
             queue[i] = i;
         else
             queue[i] = i + 1;
 
-    srand(time(NULL));
-    for (int i = nsongs - 1; i > 0; i--)
-    {
-        int j = rand() % (i + 1);
+    // shuffle the array's elements to create a song queue
+    shuffle_array(nsongs, queue);
+}
 
-        int temp = queue[i];
-        queue[i] = queue[j];
-        queue[j] = temp;
+void init_app()
+{
+    srand(time(NULL));
+    InitWindow(700,700, "music player");
+    SetTraceLogLevel(LOG_ERROR);
+    SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
+    InitAudioDevice();
+    SetTargetFPS(60);
+}
+
+int extract_metadata(const char *file_path, const char *parameter, char *output, int output_size)
+{
+    AVFormatContext *format_context = NULL;
+    AVDictionaryEntry *tag = NULL;
+    int ret;
+
+    if ((ret = avformat_open_input(&format_context, file_path, NULL, NULL)) < 0) {
+        fprintf(stderr, "Error opening file %s\n", file_path);
+        return ret;
     }
+
+    if (avformat_find_stream_info(format_context, NULL) < 0) {
+        fprintf(stderr, "Error finding stream info\n");
+        avformat_close_input(&format_context);
+        return -1;
+    }
+
+    tag = av_dict_get(format_context->metadata, parameter, NULL, AV_DICT_IGNORE_SUFFIX);
+    if (tag) {
+        snprintf(output, output_size, "%s", tag->value);
+    } else {
+        fprintf(stderr, "Parameter '%s' not found in metadata\n", parameter);
+        avformat_close_input(&format_context);
+        return -1;
+    }
+
+    avformat_close_input(&format_context);
+    return 0;
 }
 
 // TODO: 
-// add shuffle
-// add default images
-// handle edge cases (file not mp3 etc)
+    // change progress bar
+    // 
 
 int main()
 {
+    // music control flags
+    bool update_display = false;
     bool holding_progress_bar = false;
     bool play_music = false;
     bool shuffle = false;
@@ -349,60 +382,61 @@ int main()
     float percentage_played = 0.00;
     
     int song_index = 0;
-    int playlist_index = 1;
+    int playlist_index = 0;
+
+    char time_left[MAX_LEN];
+    char time_played[MAX_LEN];
 
     char playlists[NPLAYLIST][MAX_LEN];
+    int playlists_read = get_files_from_folder(MAX_LEN, NPLAYLIST, playlists, PLAYLIST_DIR);
+    
+    char playlist_path[MAX_LEN * 2];
+    sprintf(playlist_path, "%s/%s", PLAYLIST_DIR, playlists[playlist_index]);
+    
+    char songs[NSONGS][MAX_LEN];
+    int songs_read = get_files_from_folder(MAX_LEN, NSONGS, songs, playlist_path);
+    
+    int stack_ptr = -1;
+    int song_history[songs_read];
+
+    int queue_ptr = 0;
+    int song_queue[songs_read - 1];
+
     char current_playlist[MAX_LEN];
+    strcpy(current_playlist, playlists[playlist_index]);
     
     char current_song[MAX_LEN];
-    char songs[NSONGS][MAX_LEN];
-    char display_name[MAX_LEN];
-
-    char time_played[MAX_LEN];
-    char time_left[MAX_LEN];
-
-    Music music = {0};
-    Texture2D song_cover = {0};
-    Texture2D background = {0};
-
-    int playlists_read = get_files_from_folder(MAX_LEN, NPLAYLIST, playlists, PLAYLIST_DIR);
-    char playlist_path[MAX_LEN * 2];
-    snprintf(playlist_path, MAX_LEN * 2, "%s/%s", PLAYLIST_DIR, playlists[playlist_index]);
-    int songs_read = get_files_from_folder(MAX_LEN, NSONGS, songs, playlist_path);
-    print_list(MAX_LEN, songs_read, songs);
-    int stack_ptr = -1;
-    size_t stack_size = sizeof(int) * songs_read;
-    int* song_history = malloc(stack_size);
-    
-    int song_queue[songs_read - 1];
-    int queue_ptr = 0;
-    
-    strcpy(current_playlist, playlists[playlist_index]);
     strcpy(current_song, songs[song_index]);
 
     char full_song_path[MAX_LEN * 3];
-    snprintf(full_song_path, (MAX_LEN * 3), "%s/%s/%s", PLAYLIST_DIR, current_playlist, current_song);
-    remove_escape_sequence(full_song_path);
+    char linux_full_song_path[MAX_LEN * 3];
+    sprintf(full_song_path, "%s/%s/%s", PLAYLIST_DIR, current_playlist, current_song);
+    remove_character_from_string(full_song_path, '\\');
+    strcpy(linux_full_song_path, full_song_path);
+    
+    
+    char display_name[MAX_LEN];
+    extract_metadata(full_song_path, "title", display_name, MAX_LEN);
 
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(750, 750, "music player");
-    SetTraceLogLevel(LOG_ERROR);
-    SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
-    InitAudioDevice();
-    SetTargetFPS(60);
+    char artist[MAX_LEN];
+    extract_metadata(full_song_path, "artist", artist, MAX_LEN);
+    
+    init_app();
     
     FILE* cover_directory = fopen(MP3_COVER_PATH, "r");
     if(cover_directory == NULL)
-        create_cover_directory(MP3_COVER_PATH);
+        make_directory(MP3_COVER_PATH);
     else
         fclose(cover_directory);
     
-    if(is_mp3(full_song_path))
-    {
-        update_music_stream(&music, full_song_path, pitch);
-        update_cover_art(&background, &song_cover, current_playlist, current_song);
-        update_display_name(display_name, current_song);
-    }
+    Music music = {0};
+    update_music_stream(&music, full_song_path, pitch);
+    
+    Texture2D song_cover = {0};
+    Texture2D background = {0};
+    char cover_path[MAX_LEN * 2];
+    update_cover_path(cover_path, MP3_COVER_PATH, current_song);
+    update_cover_art(&background, &song_cover, cover_path,linux_full_song_path);
     
     while(!WindowShouldClose())
     {
@@ -419,11 +453,10 @@ int main()
             if(shuffle)
             {
                 queue_ptr = 0;
-                create_song_queue((songs_read - 1), song_index, song_queue);
-                add_stack_element(&song_history, &stack_ptr, &stack_size, song_index);
-            }
-            else
                 stack_ptr = -1;
+                create_song_queue((songs_read - 1), song_index, song_queue);
+                add_stack_element(song_index, songs_read, song_history, &stack_ptr);
+            }
         }
 
         if(update_position)
@@ -444,25 +477,26 @@ int main()
             StopMusicStream(music);
             PlayMusicStream(music);
         }
-        // update enviornment
+
         if(skip_song || rewind_song)
         {
             if(skip_song)
             {
                 skip_song = false;
+
                 if(shuffle)
                 {
-                    add_stack_element(&song_history, &stack_ptr, &stack_size, song_index);
                     if(queue_ptr >= songs_read - 1)
                     {
                         queue_ptr = 0;
                         stack_ptr = -1;
-                        create_song_queue((songs_read - 1), song_index, song_queue);
+                        create_song_queue((songs_read - 1),song_index, song_queue);
                     }
 
+                    add_stack_element(song_index, songs_read, song_history, &stack_ptr);
                     song_index = song_queue[queue_ptr++];
-                    
                 }
+
                 else
                     song_index = adjust_index((song_index + 1), songs_read);
             }
@@ -474,25 +508,30 @@ int main()
                 {
                     if(queue_ptr > 0)
                         queue_ptr--;
-
-                    int last_song = pop_stack(song_history, &stack_ptr);
+                    
+                    int last_song = pop_stack(songs_read, song_history, &stack_ptr);
                     if(last_song >= 0)
                         song_index = last_song;
                 }
+
                 else
                     song_index = adjust_index((song_index - 1), songs_read);
             }
 
             strcpy(current_song, songs[song_index]);
-            
-            if(is_mp3(current_song))
+            if(is_extension(current_song, ".mp3"))
             {
-                update_display_name(display_name, current_song);
-                snprintf(full_song_path, (MAX_LEN * 3), "%s/%s/%s", PLAYLIST_DIR, current_playlist, current_song);
-                remove_escape_sequence(full_song_path);
-                update_music_stream(&music, full_song_path, pitch);
-                update_cover_art(&background, &song_cover, current_playlist, current_song);
                 play_music = true;
+
+                sprintf(full_song_path,  "%s/%s/%s", PLAYLIST_DIR, current_playlist, current_song);
+                strcpy(linux_full_song_path, full_song_path);
+                remove_character_from_string(full_song_path, '\\');
+
+                update_music_stream(&music, full_song_path, pitch);
+                update_cover_path(cover_path, MP3_COVER_PATH, current_song);
+                update_cover_art(&background, &song_cover, cover_path,linux_full_song_path);
+                extract_metadata(full_song_path, "title", display_name, MAX_LEN);
+                extract_metadata(full_song_path, "artist", artist, MAX_LEN);
             }
 
             else
@@ -504,31 +543,35 @@ int main()
 
         if(play_music)
             UpdateMusicStream(music);
+
         percentage_played = GetMusicTimePlayed(music) / GetMusicTimeLength(music);
         
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
-            // if(background.id)
-            //     DrawTexture(background, 0, 0, RAYWHITE);
+            if(background.id)
+                DrawTexture(background, 0, 0, RAYWHITE);
             if(song_cover.id)
                 DrawTexture(song_cover, 0, 0, RAYWHITE);
+
             if(shuffle)
-                DrawText("SHUFFLE", 650, 700, 20, BLACK);
+                DrawText("SHUFFLE", 600, 600, 20, BLACK);
+
             skip_button(&skip_song, (!IsMusicStreamPlaying(music) && play_music), holding_progress_bar);
             pause_button( &play_music, holding_progress_bar);
-           
             rewind_button(GetMusicTimePlayed(music), &rewind_song, &restart_song, holding_progress_bar);
-            DrawText(time_played, 150, 400, 17, BLACK);
             progress_bar(&percentage_played, &update_position, &holding_progress_bar);
+           
+            DrawText(time_played, 150, 400, 17, BLACK);
             DrawText(time_left, 400, 400, 17, BLACK);
             DrawText(display_name, 300, 300, 20, BLACK);
+            DrawText(artist, 300, 325, 20, BLACK);
             DrawFPS(500,500);
         EndDrawing();
     }
 
-    free(song_history);
     save_music(current_playlist, current_song, pitch);
+
     if(song_cover.id)
         UnloadTexture(song_cover);
     if(background.id)

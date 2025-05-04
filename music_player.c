@@ -19,6 +19,18 @@ const char* PLAYLIST_DIR = "/home/bubbq/Music";
 const char* MP3_COVER_PATH = "/home/bubbq/.cache/mp3_covers";
 const char* DEFAULT_IMG = "default.png";
 
+typedef struct
+{
+    bool holding_progess_bar_slider;
+    bool update_song_position;
+    bool shuffle_play;
+    bool change_song;
+    bool skip_song;
+    bool rewind_song;
+    bool restart_song;
+    bool play_music;
+} Flags;
+
 // removes all instances of 'target' from 'string'
 void remove_character(int len, char string[], const char target)
 {
@@ -141,14 +153,14 @@ int get_files_from_folder(int maxlen, int nfiles, char dst[nfiles][maxlen], cons
 }
 
 // returns 1 if file_path is an 'extension'
-int is_extension(const char* file_path, const char* extension)
+bool is_extension(const char* file_path, const char* extension)
 {
     char* file_extenison = strrchr(file_path, '.');
 
     if(file_extenison)
         return (strcmp(file_extenison, extension) == 0);
     else
-        return 0;
+        return false;
 }
 
 // removes all non files that are not of an 'extension'
@@ -328,6 +340,7 @@ void create_song_queue(int nsongs, int current_song_index, int queue[])
 }
 
 // TODO
+    // make list of songs in window like spotify
     // clean bottom bar
 
 // initalizes the application
@@ -389,41 +402,62 @@ void seconds_to_string(int seconds, char string[])
     sprintf(string, "%2d:%02d", minutes, seconds);
 }
 
-void play_pause_button(Rectangle container, bool* is_music_playing)
+// music control buttons
+void playback_buttons(Rectangle container, Music music, Flags* flags)
 {
-    const float button_size = 20;
-    const float button_y = container.y + ((container.height - button_size) / 2.00);
-    const char* pause_button_text = *is_music_playing ? "||" : "|>";
-    Rectangle pause_button_bounds = (Rectangle){(GetScreenWidth() / 2.00) - (button_size / 2.00), button_y, button_size, button_size};
+    const int button_size = 20;
+    const float button_y_level = container.y + ((container.height - button_size) / 2.00);
 
-    if(GuiButton(pause_button_bounds, pause_button_text) || IsKeyPressed(KEY_SPACE)) 
-        *is_music_playing = !(*is_music_playing);
-}
-
-void rewind_button(Rectangle container, int time_played, bool* restart_song, bool* rewind, bool* update_song)
-{
-    const float button_size = 20;
-    const char* rewind_button_text = "<";
-    const float button_y = container.y + ((container.height - button_size) / 2.00);
-    Rectangle rewind_button_bounds = (Rectangle){(GetScreenWidth() / 2.00) - (button_size * 2.00), button_y, button_size, button_size};
-    
-    if(GuiButton(rewind_button_bounds, rewind_button_text) || IsKeyPressed(KEY_A)) {
-        if(time_played > 3.00)
-            *restart_song = true;
+    // rewind button
+    const Rectangle rewind_button = (Rectangle){(GetScreenWidth() / 2.00) - (button_size * 2.00), button_y_level, button_size, button_size};
+    if((GuiButton(rewind_button, "<") || IsKeyPressed(KEY_A)) && !flags->holding_progess_bar_slider) {
+        if(GetMusicTimePlayed(music) > 3.00)
+            flags->restart_song = true;
         else 
-            *update_song = *rewind = true;
+            flags->change_song = flags->rewind_song = true;
     }
+
+    // pause/play button
+    const Rectangle pause_button = (Rectangle){(GetScreenWidth() / 2.00) - (button_size / 2.00), button_y_level, button_size, button_size};
+    if(GuiButton(pause_button, flags->play_music ? "||" : "|>") || IsKeyPressed(KEY_SPACE)) 
+        flags->play_music = !flags->play_music;
+
+    // skip button
+    bool song_over = !IsMusicStreamPlaying(music) && flags->play_music;
+    const Rectangle skip_button_bounds = (Rectangle){(GetScreenWidth() / 2.00) + button_size, button_y_level, button_size, button_size};
+    if((GuiButton(skip_button_bounds, ">") || IsKeyPressed(KEY_D) || song_over) && !flags->holding_progess_bar_slider)
+        flags->change_song = flags->skip_song = true;
 }
 
-void skip_button(Rectangle container, bool* update_song, bool* skip_song, bool is_song_over)
+void progress_bar(Rectangle container, Flags* flags, float* percentage_played, int time_played, int song_length)
 {
-    const float button_size = 20;
-    const float button_y = container.y + ((container.height - button_size) / 2.00);
-    const char* skip_button_text = ">";
-    Rectangle skip_button_bounds = (Rectangle){(GetScreenWidth() / 2.00) + button_size, button_y, button_size, button_size};
+    // update the slider strings when dragging the bar around
+    if(flags->holding_progess_bar_slider)
+        time_played = song_length * (*percentage_played);
 
-    if(GuiButton(skip_button_bounds, skip_button_text) || IsKeyPressed(KEY_D) || is_song_over)
-        *update_song = *skip_song = true;
+    // converting current and total song time into strings in 00:00 format
+    char time_played_text[LEN];
+    char song_length_text[LEN];
+    seconds_to_string(time_played, time_played_text);
+    seconds_to_string(song_length, song_length_text);
+
+    float progress_bar_width = GetScreenWidth() * 0.40;
+    const Rectangle progress_bar_bounds = {(GetScreenWidth() / 2.00) - (progress_bar_width / 2.00), container.y + (container.height * 0.75), progress_bar_width, 10};
+    
+    if(GuiSliderBar(progress_bar_bounds, time_played_text, song_length_text, percentage_played, 0.00, 1.00))
+        flags->holding_progess_bar_slider = true;
+    
+    // when the mouse is released after updating the slider is when the stream position is adjusted
+    if(IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && flags->holding_progess_bar_slider) {
+        flags->holding_progess_bar_slider = false;
+        
+        if(!(*percentage_played))
+            flags->restart_song = true;
+        else if(*percentage_played == 1)
+            flags->change_song = flags->skip_song = true;
+        else
+            flags->update_song_position = true;
+    }
 }
 
 int main()
@@ -454,7 +488,6 @@ int main()
 
     // the full path of the current song
     char full_song_path[LEN * 3];
-    char linux_full_song_path[LEN * 3];
 
     // the actual song and artist (stored in the metadata of the mp3 file, see 'ffprobe') 
     char song_title[LEN];
@@ -480,8 +513,8 @@ int main()
     sprintf(current_playlist_path, "%s/%s", PLAYLIST_DIR, current_playlist);
 
     // getting all the song paths from the current playlist and filtering out any non mp3s
-    songs_read = get_files_from_folder(LEN, NSONGS, songs, current_playlist_path, DT_REG);
-    songs_read = filter_library(LEN, songs_read, songs, ".mp3");
+    int nfiles = get_files_from_folder(LEN, NSONGS, songs, current_playlist_path, DT_REG);
+    songs_read = filter_library(LEN, nfiles, songs, ".mp3");
 
     if(!songs_read) {
         printf("there are no mp3s in the playlist \"%s\", please add some\n", current_playlist_path);
@@ -493,29 +526,21 @@ int main()
     
     // updating full song path
     sprintf(full_song_path, "%s/%s", current_playlist_path, current_song);
-    strcpy(linux_full_song_path, full_song_path);
     remove_character(strlen(full_song_path), full_song_path, '\\');
 
     // updating display text, use filenames if paramters are not avaible
-    if(extract_metadata(LEN, song_title, full_song_path, "title") < 0) {
+    if(extract_metadata(sizeof(full_song_path), song_title, full_song_path, "title") < 0) {
         strcpy(song_title, current_song);
         remove_character(strlen(song_title), song_title, '\\');
     }
 
-    if(extract_metadata(LEN, artist_name, full_song_path, "artist") < 0) 
+    if(extract_metadata(sizeof(full_song_path), artist_name, full_song_path, "artist") < 0) 
         artist_name[0] = '\0';
 
     init_app();
 
     // music control flags
-    bool holding_progess_bar_slider = false;
-    bool update_song_position = false;
-    bool shuffle_play = false;
-    bool update_song = false;
-    bool skip_song = false;
-    bool rewind_song = false;
-    bool restart_song = false;
-    bool play_music = false;
+    Flags flags = {false}; 
 
     // the speed of the music being played
     float pitch = 1.00;
@@ -532,33 +557,34 @@ int main()
     while(!WindowShouldClose()) {
         // toggling shuffle mode
         if(IsKeyPressed(KEY_X)) {
-            shuffle_play = !shuffle_play;
+            flags.shuffle_play = !flags.shuffle_play;
 
-            if(shuffle_play) {
+            if(flags.shuffle_play) {
                 song_history = 0;
                 create_song_queue(songs_read, song_index, shuffled_song_queue);
             }
         }
 
-        if(update_song_position) {
-            update_song_position = false;
+        if(flags.update_song_position) {
+            flags.update_song_position = false;
             SeekMusicStream(music, GetMusicTimeLength(music) * percentage_played);
         }
 
         // restarting current music stream
-        if(restart_song) {
-            restart_song = false;
+        if(flags.restart_song) {
+            flags.restart_song = false;
+
             StopMusicStream(music);
             PlayMusicStream(music);
         }
 
-        if(update_song) { 
-            update_song = false;
+        if(flags.change_song) { 
+            flags.change_song = false;
             
-            if(skip_song) {
-                skip_song = false;
+            if(flags.skip_song) {
+                flags.skip_song = false;
 
-                if(shuffle_play) {
+                if(flags.shuffle_play) {
                     if(song_history >= songs_read - 1) { 
                         int first_song;
                         while((first_song = GetRandomValue(0, (songs_read - 1))) == song_index)
@@ -574,10 +600,10 @@ int main()
                     song_index++;
             }
 
-            else if(rewind_song) {
-                rewind_song = false;
+            else if(flags.rewind_song) {
+                flags.rewind_song = false;
 
-                if(shuffle_play) {
+                if(flags.shuffle_play) {
                     if(song_history)
                         song_history--;
                     
@@ -588,13 +614,12 @@ int main()
                     song_index--;
             }
             
-            play_music = true;
+            flags.play_music = true;
 
             // updating index and strings
             song_index = adjust_index(song_index, songs_read);
             strcpy(current_song, songs[song_index]);
             sprintf(full_song_path, "%s/%s", current_playlist_path, current_song);
-            strcpy(linux_full_song_path, full_song_path);
             remove_character(sizeof(full_song_path), full_song_path, '\\');
             
             // updating display image
@@ -615,11 +640,11 @@ int main()
         }
 
         // playing music
-        if(play_music)
+        if(flags.play_music)
             UpdateMusicStream(music);
 
-        if(!holding_progess_bar_slider)
-                percentage_played = (GetMusicTimePlayed(music) / GetMusicTimeLength(music));
+        if(!flags.holding_progess_bar_slider)
+            percentage_played = (GetMusicTimePlayed(music) / GetMusicTimeLength(music));
 
         BeginDrawing();
             ClearBackground(RAYWHITE);
@@ -631,48 +656,25 @@ int main()
             {
                 const float bar_height = 75.00; 
                 const float image_padding = (bar_height - IMG_SIZE) / 2.00;
-                Rectangle bottom_bar_border = (Rectangle) {0, GetScreenHeight() - bar_height, GetScreenWidth(), bar_height};
+                const Rectangle bottom_bar_bounds = (Rectangle) {0, GetScreenHeight() - bar_height, GetScreenWidth(), bar_height};
                 
-                // current song image
-                DrawTexture(song_image, image_padding, (bottom_bar_border.y + image_padding), RAYWHITE);
-                // displaying current song information
-                DrawText(song_title, (bottom_bar_border.x + (image_padding * 2) + IMG_SIZE), bottom_bar_border.y + (bar_height / 4.00), 15, BLACK);
-                DrawText(artist_name, (bottom_bar_border.x + (image_padding * 2) + IMG_SIZE), bottom_bar_border.y + (bar_height / 2.00), 15, BLACK);
+                DrawRectangleRec(bottom_bar_bounds, LIGHTGRAY);
                 
-                // buttons
-                rewind_button(bottom_bar_border, GetMusicTimePlayed(music), &restart_song, &rewind_song, &update_song);
-                play_pause_button(bottom_bar_border, &play_music);
-                skip_button(bottom_bar_border, &update_song, &skip_song, (!IsMusicStreamPlaying(music) && play_music));
+                // song cover image
+                DrawTexture(song_image, image_padding, (bottom_bar_bounds.y + image_padding), RAYWHITE);
+
+                // displaying song information
+                DrawText(song_title, (bottom_bar_bounds.x + (image_padding * 2) + IMG_SIZE), bottom_bar_bounds.y + (bar_height / 4.00), 15, BLACK);
+                DrawText(artist_name, (bottom_bar_bounds.x + (image_padding * 2) + IMG_SIZE), bottom_bar_bounds.y + (bar_height / 2.00), 15, BLACK);
+                
+                // pause, rewind, and skip buttons
+                playback_buttons(bottom_bar_bounds, music, &flags);
 
                 // progress bar
-                int time_elapsed = holding_progess_bar_slider ? (GetMusicTimeLength(music) * percentage_played) : GetMusicTimePlayed(music);
-                
-                char time_played[LEN];
-                seconds_to_string(time_elapsed, time_played);
-                
-                char duration[LEN];
-                seconds_to_string(GetMusicTimeLength(music), duration);
-
-                float progress_bar_width = GetScreenWidth() * 0.40;
-                const Rectangle progress_bar_bounds = {(GetScreenWidth() / 2.00) - (progress_bar_width / 2.00), bottom_bar_border.y + (bar_height * 0.75), progress_bar_width, 10};
-                
-                if(GuiSliderBar(progress_bar_bounds, time_played, duration, &percentage_played, 0.00, 1.00))
-                    holding_progess_bar_slider = true;
-                
-                if(IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && holding_progess_bar_slider) {
-                    holding_progess_bar_slider = false;
-                    
-                    if(!percentage_played)
-                        restart_song = true;
-                    else if(percentage_played == 1)
-                        update_song = skip_song = true;
-                    else
-                        update_song_position = true;
-                }
-               
+                progress_bar(bottom_bar_bounds, &flags, &percentage_played, GetMusicTimePlayed(music), GetMusicTimeLength(music));
             }
 
-            if(shuffle_play)
+            if(flags.shuffle_play)
                 DrawText("SHUFFLE", 100, 400, 15, BLACK);
             DrawFPS(0, 0);
         EndDrawing();
@@ -686,3 +688,7 @@ int main()
     CloseWindow();
     return 0;
 }
+
+// fix code :updated by: ...
+// fill in effort estimation
+// 

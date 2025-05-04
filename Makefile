@@ -10,5 +10,4 @@ all:
 
 clean:
 	rm -rf $(HOME)/.cache/mp3_covers
-	rm run
-	rm saved_music.txt
+	rm music_player

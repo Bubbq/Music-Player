@@ -1,6 +1,9 @@
 #include "headers/raylib.h"
+#include "raylib.h"
+#include "raylib/src/raylib.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <libavformat/avformat.h>
@@ -9,7 +12,7 @@
 #define RAYGUI_IMPLEMENTATION
 #include "headers/raygui.h"
 
-#define LEN 512
+#define LEN 256
 #define NSONGS 100
 #define NPLAYLIST 100
 #define IMG_SIZE 68
@@ -31,96 +34,14 @@ typedef struct
     bool play_music;
 } Flags;
 
-// removes all instances of 'target' from 'string'
-void remove_character(int len, char string[], const char target)
-{
-    int k = 0;
-    int length = strlen(string);
-
-    for(int i = 0; i < length; i++) {
-        if(string[i] != target) {
-            if(k != i)
-                string[k] = string[i];
-            k++;
-        }
-    }
-
-    string[k] = '\0';
-}
-
-// converts a filepath 'src' into a linux formatted file stored into 'dst', retruns dst size
-int linux_format(int maxlen, char dst[], const char* src)
-{
-    // characters in linux that need escape sequences 
-    const char BAD_CHARS [] = " ()&'`\\!\"$*?#{}[]|;<>~";
-
-    // their corresponding replacement
-    const char* REPLACE[] = {
-        "\\ ",  // space
-        "\\(",  // (
-        "\\)",  // )
-        "\\&",  // &
-        "\\'",  // '
-        "\\`",  // `
-        "\\\\", // backslash
-        "\\!",  // !
-        "\\\"", // "
-        "\\$",  // $
-        "\\*",  // *
-        "\\?",  // ?
-        "\\#",  // #
-        "\\{",  // {
-        "\\}",  // }
-        "\\[",  // [
-        "\\]",  // ]
-        "\\|",  // |
-        "\\;",  // ;
-        "\\<",  // <
-        "\\>",  // >
-        "\\~"   // ~
-    };
-
-    int n_characters = strlen(src);
-    int length = 0; // current index of dst
-    char* next_invalid = NULL; // a ptr to an invalid char in BAD_CHARS
-
-    for(int i = 0; i < n_characters; i++, (next_invalid = strchr(BAD_CHARS, src[i]))) {
-        
-        // if the ith char is a bad one, overwrite with the corresp replacement string
-        if(next_invalid) {
-
-            int replacement_index = next_invalid - BAD_CHARS;
-            const char* replacement_string = REPLACE[replacement_index];
-            int replacement_length = strlen(replacement_string);
-
-            if(length + replacement_length < maxlen - 1) {
-                strcpy(dst + length, replacement_string);
-                length += replacement_length;
-            }
-            
-            else
-                return 0;
-        }
-
-        else if(length < maxlen - 1)
-            dst[length++] = src[i];
-
-        else
-            return 0;
-    }
-
-    dst[length] = '\0';
-    return length;
-}
-
-// comparator needed for qsort
+// comparator function needed for qsort
 int cmp(const void* a, const void* b)
 {
     return strcmp((const char*)a, (const char*)b);
 }
 
 // returns the number of files in 'folder_path' of type 'file_type' stored in 'dst'
-int get_files_from_folder(int maxlen, int nfiles, char dst[nfiles][maxlen], const char* folder_path, const char file_type)
+int get_files_from_folder(int maxlen, int maxfiles, char dst[maxfiles][maxlen], const char* folder_path, const char file_type)
 {
     DIR* pDIR = NULL;
     struct dirent* pDirent = NULL;
@@ -130,29 +51,18 @@ int get_files_from_folder(int maxlen, int nfiles, char dst[nfiles][maxlen], cons
         return 0;
     }
 
-    char buffer[maxlen];
+    // read all non hidden files that are of a matching file_type
     int files_read = 0;
-
     while((pDirent = readdir(pDIR)) != NULL) {
-        strcpy(buffer, pDirent->d_name);
-        
-        if((buffer[0] == '.') || (pDirent->d_type != file_type))
-            continue;
-        
-        if(linux_format(maxlen, dst[files_read], buffer) > 0) 
-            files_read++;
-
-        // ignore strings longer than maxlen
-        else
-            dst[files_read][0] = '\0';
+        if(pDirent->d_name[0] != '.' && pDirent->d_type == file_type)
+            strcpy(dst[files_read++], pDirent->d_name);
     }
 
     closedir(pDIR);
-    qsort(dst, files_read, sizeof(dst[0]), cmp); // sort the files alphabetically
     return files_read;
 }
 
-// returns 1 if file_path is an 'extension'
+// returns true if the path is of the passed extension
 bool is_extension(const char* file_path, const char* extension)
 {
     char* file_extenison = strrchr(file_path, '.');
@@ -339,10 +249,6 @@ void create_song_queue(int nsongs, int current_song_index, int queue[])
     shuffle_array(nsongs - 1, queue + 1);
 }
 
-// TODO
-    // make list of songs in window like spotify
-    // clean bottom bar
-
 // initalizes the application
 void init_app()
 {
@@ -356,7 +262,7 @@ void init_app()
 }
 
 // loads mp3 file specified in full_song_path
-void load_new_song(Music* music, char* full_song_path, float pitch)
+void load_new_song(Music* music, char* full_song_path, float pitch, float volume, float pan)
 {
     if(music->ctxData)
         UnloadMusicStream(*music);
@@ -364,6 +270,8 @@ void load_new_song(Music* music, char* full_song_path, float pitch)
     *music = LoadMusicStream(full_song_path);
     music->looping = false;
     SetMusicPitch(*music, pitch);
+    SetMusicVolume(*music, volume);
+    SetMusicPan(*music, pan);
 }
 
 // finds the array's equivalent of index 
@@ -429,6 +337,7 @@ void playback_buttons(Rectangle container, Music music, Flags* flags)
         flags->change_song = flags->skip_song = true;
 }
 
+// slider to change current position in song
 void progress_bar(Rectangle container, Flags* flags, float* percentage_played, int time_played, int song_length)
 {
     // update the slider strings when dragging the bar around
@@ -460,11 +369,61 @@ void progress_bar(Rectangle container, Flags* flags, float* percentage_played, i
     }
 }
 
+// sliders that adjust the music pitch, volume and pan of audio
+void music_settings(Rectangle container, Music* music, float* music_pitch, float* music_volume, float* audio_pan)
+{
+    const float slider_width = container.width * 0.10;
+
+    const Rectangle speed_slider_bounds = {container.width - (slider_width * 1.50), container.y + 15, slider_width, 10};
+    if(GuiSliderBar(speed_slider_bounds, "SPEED", "", music_pitch, 0.875, 1.125))
+        SetMusicPitch(*music, *music_pitch);
+
+    const Rectangle volume_slider_bounds = {container.width - (slider_width * 1.50), speed_slider_bounds.y + (speed_slider_bounds.height * 2), slider_width, 10};
+    if(GuiSliderBar(volume_slider_bounds, "VOLUME", "", music_volume, 0, 1))
+        SetMusicVolume(*music, *music_volume);
+
+    const Rectangle pan_slider_bounds = {container.width - (slider_width * 1.50), volume_slider_bounds.y + (volume_slider_bounds.height * 2), slider_width, 10};
+    if(GuiSliderBar(pan_slider_bounds, "PAN", "", audio_pan, 0, 1))
+        SetMusicPan(*music, *audio_pan);
+}
+
+// reverses the content of a string of length 'len'
+void reverse_string(int len, char string[])
+{
+    for (int i = 0; i < len / 2; i++) {
+        char temp = string[i];
+        string[i] = string[len - i - 1];
+        string[len - i - 1] = temp;
+    }
+}
+
+// returns the string equivalent of an integer
+char* itoa(int value, int maxlen, char string[])
+{
+    bool neagtive_number = value < 0;
+
+    int i = 0;
+    if(!value)
+        string[i++] = 0;
+
+    else {
+        for(; value && i < maxlen; i++, value /= 10)
+            string[i] = (value % 10) + '0';
+    }
+
+    if(neagtive_number)
+        string[i++] = '-';
+
+    string[i] = '\0';
+    reverse_string(strlen(string), string);
+    return string;
+}
+
 int main()
 {   
     // pointers to current playlist and song
     int song_index, playlist_index;
-    playlist_index = song_index = 0;
+    playlist_index = song_index = 1;
 
     // the size of both playlist and current song libraries
     int playlists_read, songs_read;
@@ -501,9 +460,7 @@ int main()
     if(!directory_exists(MP3_COVER_PATH))
         make_directory(MP3_COVER_PATH);
 
-    playlists_read = get_files_from_folder(LEN, NPLAYLIST, playlists, PLAYLIST_DIR, DT_DIR);
-    
-    if(!playlists_read) {
+    if((playlists_read = get_files_from_folder(LEN, NPLAYLIST, playlists, PLAYLIST_DIR, DT_DIR)) == 0) {
         printf("there are no folders to represent playlists in \"%s\", please add some\n", PLAYLIST_DIR);
         return 1;
     }
@@ -512,11 +469,10 @@ int main()
     strcpy(current_playlist, playlists[playlist_index]);
     sprintf(current_playlist_path, "%s/%s", PLAYLIST_DIR, current_playlist);
 
-    // getting all the song paths from the current playlist and filtering out any non mp3s
-    int nfiles = get_files_from_folder(LEN, NSONGS, songs, current_playlist_path, DT_REG);
-    songs_read = filter_library(LEN, nfiles, songs, ".mp3");
+    // getting all mp3s from the current playlist
+    int potential_songs = get_files_from_folder(LEN, NSONGS, songs, current_playlist_path, DT_REG);
 
-    if(!songs_read) {
+    if((songs_read = filter_library(LEN, potential_songs, songs, ".mp3")) == 0) {
         printf("there are no mp3s in the playlist \"%s\", please add some\n", current_playlist_path);
         return 1;
     }
@@ -526,16 +482,18 @@ int main()
     
     // updating full song path
     sprintf(full_song_path, "%s/%s", current_playlist_path, current_song);
-    remove_character(strlen(full_song_path), full_song_path, '\\');
+    
+    char fullpath_buffer[LEN * 3];
+    sprintf(fullpath_buffer, "%s/", current_playlist_path);
+    int starting_point = strlen(fullpath_buffer);
 
-    // updating display text, use filenames if paramters are not avaible
-    if(extract_metadata(sizeof(full_song_path), song_title, full_song_path, "title") < 0) {
-        strcpy(song_title, current_song);
-        remove_character(strlen(song_title), song_title, '\\');
-    }
-
-    if(extract_metadata(sizeof(full_song_path), artist_name, full_song_path, "artist") < 0) 
+    if(extract_metadata(LEN, artist_name, full_song_path, "artist") < 0)    
         artist_name[0] = '\0';
+
+    if(extract_metadata(LEN, song_title, full_song_path, "title") < 0) {
+        strcpy(song_title, current_song);
+        remove_extension(song_title);
+    }
 
     init_app();
 
@@ -543,17 +501,36 @@ int main()
     Flags flags = {false}; 
 
     // the speed of the music being played
-    float pitch = 1.00;
     float percentage_played = 0.00;
+    float pitch = 1.00;
+    float volume = 0.50;
+    float pan = 0.50;
 
     Music music = {0};
-    load_new_song(&music, full_song_path, pitch);
+    load_new_song(&music, full_song_path, pitch, volume, pan);
     PlayMusicStream(music);
 
     Texture2D song_image = {0};
-    update_cover_path(sizeof(song_cover_path), song_cover_path, current_song);
+    update_cover_path((LEN * 2), song_cover_path, current_song);
     update_display_image(&song_image, song_cover_path, full_song_path, IMG_SIZE);
+
+    // the bounds that each song will be stored in
+    Rectangle content_rectangles[NSONGS];
+
+    // setting the inital positions
+    for(int i = 0, y_level = 0; i < songs_read; i++, y_level += 30) 
+        content_rectangles[i] = (Rectangle){0, y_level, GetScreenWidth(), 30};
     
+    // bounds of scroll panel window
+    Rectangle panelRec;
+    
+    // bounds of content
+    Rectangle panelContentRec = (Rectangle){0, 0, GetScreenWidth(), (content_rectangles->height * songs_read)}; ;
+
+    Rectangle panelView = {0, 0};
+
+    Vector2 panelScroll = {99, -20};
+
     while(!WindowShouldClose()) {
         // toggling shuffle mode
         if(IsKeyPressed(KEY_X)) {
@@ -620,22 +597,21 @@ int main()
             song_index = adjust_index(song_index, songs_read);
             strcpy(current_song, songs[song_index]);
             sprintf(full_song_path, "%s/%s", current_playlist_path, current_song);
-            remove_character(sizeof(full_song_path), full_song_path, '\\');
             
-            // updating display image
-            update_cover_path(sizeof(song_cover_path), song_cover_path, current_song);
-            update_display_image(&song_image, song_cover_path, full_song_path, IMG_SIZE);
-
-            // updating display text
-            if(extract_metadata(sizeof(song_title), song_title, full_song_path, "title") < 0) {
-                strcpy(song_title, current_song);
-                remove_character(strlen(song_title), song_title, '\\');
-            }
-
-            if(extract_metadata(sizeof(artist_name), artist_name, full_song_path, "artist") < 0) 
+            if(extract_metadata(LEN, artist_name, full_song_path, "artist") < 0)    
                 artist_name[0] = '\0';
 
-            load_new_song(&music, full_song_path, pitch);
+            if(extract_metadata(LEN, song_title, full_song_path, "title") < 0) {
+                strcpy(song_title, current_song);
+                remove_extension(song_title);
+            }
+
+            // updating display image
+            update_cover_path((LEN * 3), song_cover_path, current_song);
+            update_display_image(&song_image, song_cover_path, full_song_path, IMG_SIZE);
+
+            // playing new song
+            load_new_song(&music, full_song_path, pitch, volume, pan);
             PlayMusicStream(music);
         }
 
@@ -648,35 +624,85 @@ int main()
 
         BeginDrawing();
             ClearBackground(RAYWHITE);
-            // adjusting the pitch
-            if(GuiSliderBar((Rectangle){35, 500, 100, 15}, "speed", "", &pitch, 0.875, 1.125))
-                SetMusicPitch(music, pitch);
+
+            const float bar_height = 80.00; 
+            const Rectangle bottom_bar_bounds = (Rectangle) {0, GetScreenHeight() - bar_height, GetScreenWidth(), bar_height};
+
+            // BODY
+            {
+                const float SCROLL_BAR_WIDTH = 12;
+
+                panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() - bottom_bar_bounds.height + SCROLL_BAR_WIDTH};
+                GuiScrollPanel(panelRec, NULL, panelContentRec, &panelScroll, &panelView);
+
+                bool scrollbar_visible = panelContentRec.height > GetScreenHeight();
+                
+                for(int i = 0; i < songs_read; i++)
+                {
+                    // the updated bounds of the rectangle from scrolling, only y and width are adjusted each frame
+                    Rectangle adjusted_content_rectangle = content_rectangles[i];
+
+                    adjusted_content_rectangle.y += panelScroll.y;
+                    adjusted_content_rectangle.width = GetScreenWidth();
+                    if(scrollbar_visible)
+                        adjusted_content_rectangle.width -= SCROLL_BAR_WIDTH;  
+
+                    char buffer[LEN];
+                    Color color = (i == song_index) ? GREEN : BLACK;
+                        
+                    if((adjusted_content_rectangle.y + adjusted_content_rectangle.height) < bottom_bar_bounds.y) {
+                        if(CheckCollisionPointRec(GetMousePosition(), adjusted_content_rectangle)) {
+                            color = RED;
+
+                            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                                if(i == song_index)
+                                    flags.restart_song = true;
+                                else {
+                                    flags.change_song = true;
+
+                                    if(flags.shuffle_play) {
+                                        song_history = 0;
+                                        create_song_queue(songs_read, i, shuffled_song_queue);
+                                    }
+
+                                    song_index = i;
+                                }
+                            }
+                        }
+
+                        DrawText(itoa(i + 1, LEN, buffer), 15, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
+                        DrawText(songs[i], 60, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
+                    }
+                }
+            }  
 
             // BOTTOM BAR
             {
-                const float bar_height = 75.00; 
                 const float image_padding = (bar_height - IMG_SIZE) / 2.00;
-                const Rectangle bottom_bar_bounds = (Rectangle) {0, GetScreenHeight() - bar_height, GetScreenWidth(), bar_height};
-                
-                DrawRectangleRec(bottom_bar_bounds, LIGHTGRAY);
+                DrawRectanglePro(bottom_bar_bounds, (Vector2){0,0}, 0.0f, LIGHTGRAY);
                 
                 // song cover image
                 DrawTexture(song_image, image_padding, (bottom_bar_bounds.y + image_padding), RAYWHITE);
 
-                // displaying song information
-                DrawText(song_title, (bottom_bar_bounds.x + (image_padding * 2) + IMG_SIZE), bottom_bar_bounds.y + (bar_height / 4.00), 15, BLACK);
-                DrawText(artist_name, (bottom_bar_bounds.x + (image_padding * 2) + IMG_SIZE), bottom_bar_bounds.y + (bar_height / 2.00), 15, BLACK);
+                // song information
+                float text_starting_point = bottom_bar_bounds.x + (image_padding * 2.00) + IMG_SIZE;
+                DrawText(current_playlist, text_starting_point, bottom_bar_bounds.y + 10, 20, BLACK);
+                DrawText(song_title, text_starting_point, bottom_bar_bounds.y + 35, 15, BLACK);
+                DrawText(artist_name, text_starting_point, bottom_bar_bounds.y + 55, 8, BLACK);
                 
                 // pause, rewind, and skip buttons
                 playback_buttons(bottom_bar_bounds, music, &flags);
 
                 // progress bar
                 progress_bar(bottom_bar_bounds, &flags, &percentage_played, GetMusicTimePlayed(music), GetMusicTimeLength(music));
+
+                // music control sliders
+                music_settings(bottom_bar_bounds, &music, &pitch, &volume, &pan);
             }
 
             if(flags.shuffle_play)
                 DrawText("SHUFFLE", 100, 400, 15, BLACK);
-            DrawFPS(0, 0);
+            DrawFPS(0, GetScreenHeight()/2);
         EndDrawing();
     }
 
@@ -684,11 +710,14 @@ int main()
         UnloadTexture(song_image);
     if(music.ctxData)
         UnloadMusicStream(music);
+
     CloseAudioDevice();
     CloseWindow();
     return 0;
 }
 
-// fix code :updated by: ...
-// fill in effort estimation
-// 
+// TODO
+// FRONT END
+    // change displaynames to actual song titles and display artist
+    // add arrow instead of number when hovering over current song
+    // have button for shuffle

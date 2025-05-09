@@ -1,12 +1,8 @@
 #include "headers/raylib.h"
-#include "raylib.h"
-#include "raylib/src/raylib.h"
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <dirent.h>
 #include <libavformat/avformat.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <sys/stat.h>
 
 #define RAYGUI_IMPLEMENTATION
@@ -92,12 +88,10 @@ int filter_library(int maxlen, int nsongs, char library[nsongs][maxlen], const c
 // removes the extension of a mutuable string
 void remove_extension(char file[])
 {
-    if(file) {
     char* file_extension = strrchr(file, '.');
 
     if(file_extension)
         file[file_extension - file] = '\0';
-    }
 }
 
 // stores the path of the cover image of the current song in 'song_cover_path'
@@ -145,7 +139,6 @@ int extract_metadata(int maxlen, char dst[], const char *file_path, const char *
 
     // the info of the parameter passed
     tag = av_dict_get(format_context->metadata, parameter, NULL, AV_DICT_IGNORE_SUFFIX);
-
     if(tag && (strlen(tag->value) < maxlen))
         strcpy(dst, tag->value);
 
@@ -258,7 +251,7 @@ void init_app()
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(750,750, "music player");
     InitAudioDevice();
-    SetTargetFPS(60);
+    SetTargetFPS(120);
 }
 
 // loads mp3 file specified in full_song_path
@@ -310,34 +303,43 @@ void seconds_to_string(int seconds, char string[])
     sprintf(string, "%2d:%02d", minutes, seconds);
 }
 
-// music control buttons
-void playback_buttons(Rectangle container, Music music, Flags* flags)
+bool pause_button(Rectangle container, bool play_music)
 {
-    const int button_size = 20;
-    const float button_y_level = container.y + ((container.height - button_size) / 2.00);
-
-    // rewind button
-    const Rectangle rewind_button = (Rectangle){(GetScreenWidth() / 2.00) - (button_size * 2.00), button_y_level, button_size, button_size};
-    if((GuiButton(rewind_button, "<") || IsKeyPressed(KEY_A)) && !flags->holding_progess_bar_slider) {
-        if(GetMusicTimePlayed(music) > 3.00)
-            flags->restart_song = true;
-        else 
-            flags->change_song = flags->rewind_song = true;
-    }
-
-    // pause/play button
-    const Rectangle pause_button = (Rectangle){(GetScreenWidth() / 2.00) - (button_size / 2.00), button_y_level, button_size, button_size};
-    if(GuiButton(pause_button, flags->play_music ? "||" : "|>") || IsKeyPressed(KEY_SPACE)) 
-        flags->play_music = !flags->play_music;
-
-    // skip button
-    bool song_over = !IsMusicStreamPlaying(music) && flags->play_music;
-    const Rectangle skip_button_bounds = (Rectangle){(GetScreenWidth() / 2.00) + button_size, button_y_level, button_size, button_size};
-    if((GuiButton(skip_button_bounds, ">") || IsKeyPressed(KEY_D) || song_over) && !flags->holding_progess_bar_slider)
-        flags->change_song = flags->skip_song = true;
+    const int BUTTON_SIZE = 20;
+    const float Y_LEVEL = container.y + ((container.height - BUTTON_SIZE) / 2.00);
+    const Rectangle PAUSE = (Rectangle){(GetScreenWidth() / 2.00) - (BUTTON_SIZE / 2.00), Y_LEVEL, BUTTON_SIZE, BUTTON_SIZE};
+    
+    // returns the opposite of the current music play state if button or space key is pressed 
+    return (GuiButton(PAUSE, play_music ? "||" : "|>") || IsKeyPressed(KEY_SPACE)) ? !play_music : play_music;
 }
 
-// slider to change current position in song
+bool skip_button(Rectangle container, bool song_over) 
+{
+    const int BUTTON_SIZE = 20;
+    const float Y_LEVEL = container.y + ((container.height - BUTTON_SIZE) / 2.00);
+    const Rectangle SKIP = (Rectangle){(GetScreenWidth() / 2.00) + BUTTON_SIZE, Y_LEVEL, BUTTON_SIZE, BUTTON_SIZE};
+
+    // skip to next song when the song is over or when user presses 'D' 
+    return (song_over) || (GuiButton(SKIP, ">") || IsKeyPressed(KEY_D));
+}
+
+void rewind_button(Rectangle container, float time_played, bool* change_song, bool* rewind_song, bool* restart_song)
+{
+    // the amount of time that needs to be played to restart rather than rewind
+    const float THRESHOLD = 3.00;
+    const int BUTTON_SIZE = 20;
+    const float Y_LEVEL = container.y + ((container.height - BUTTON_SIZE) / 2.00);
+    const Rectangle REWIND = (Rectangle){(GetScreenWidth() / 2.00) - (BUTTON_SIZE * 2.00), Y_LEVEL, BUTTON_SIZE, BUTTON_SIZE};
+
+    if((GuiButton(REWIND, "<") || IsKeyPressed(KEY_A))) {
+        if(time_played > THRESHOLD)
+            *restart_song = true;
+        else 
+            *rewind_song = true;
+    }
+}
+
+// slider to change position in song
 void progress_bar(Rectangle container, Flags* flags, float* percentage_played, int time_played, int song_length)
 {
     // update the slider strings when dragging the bar around
@@ -351,18 +353,18 @@ void progress_bar(Rectangle container, Flags* flags, float* percentage_played, i
     seconds_to_string(song_length, song_length_text);
 
     float progress_bar_width = GetScreenWidth() * 0.40;
-    const Rectangle progress_bar_bounds = {(GetScreenWidth() / 2.00) - (progress_bar_width / 2.00), container.y + (container.height * 0.75), progress_bar_width, 10};
+    const Rectangle BOUNDS = {(GetScreenWidth() / 2.00) - (progress_bar_width / 2.00), container.y + (container.height * 0.75), progress_bar_width, 10};
     
-    if(GuiSliderBar(progress_bar_bounds, time_played_text, song_length_text, percentage_played, 0.00, 1.00))
+    if(GuiSliderBar(BOUNDS, time_played_text, song_length_text, percentage_played, 0.00, 1.00))
         flags->holding_progess_bar_slider = true;
     
     // when the mouse is released after updating the slider is when the stream position is adjusted
     if(IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && flags->holding_progess_bar_slider) {
         flags->holding_progess_bar_slider = false;
         
-        if(!(*percentage_played))
+        if((*percentage_played) == 0.00)
             flags->restart_song = true;
-        else if(*percentage_played == 1)
+        else if(*percentage_played == 1.00)
             flags->change_song = flags->skip_song = true;
         else
             flags->update_song_position = true;
@@ -372,18 +374,20 @@ void progress_bar(Rectangle container, Flags* flags, float* percentage_played, i
 // sliders that adjust the music pitch, volume and pan of audio
 void music_settings(Rectangle container, Music* music, float* music_pitch, float* music_volume, float* audio_pan)
 {
-    const float slider_width = container.width * 0.10;
+    const float SLIDER_WIDTH = container.width / 10;;
 
-    const Rectangle speed_slider_bounds = {container.width - (slider_width * 1.50), container.y + 15, slider_width, 10};
-    if(GuiSliderBar(speed_slider_bounds, "SPEED", "", music_pitch, 0.875, 1.125))
+    const Rectangle PITCH_BOUNDS = {container.width - (SLIDER_WIDTH * 1.50), container.y + 15, SLIDER_WIDTH, 10};
+    const Rectangle VOLUME_BOUNDS = {container.width - (SLIDER_WIDTH * 1.50), container.y + 35, SLIDER_WIDTH, 10};
+    const Rectangle PAN_BOUNDS = {container.width - (SLIDER_WIDTH * 1.50), container.y + 55, SLIDER_WIDTH, 10};
+
+    // adusting music parameters
+    if(GuiSliderBar(PITCH_BOUNDS, "PITCH", "", music_pitch, 0.875, 1.125))
         SetMusicPitch(*music, *music_pitch);
 
-    const Rectangle volume_slider_bounds = {container.width - (slider_width * 1.50), speed_slider_bounds.y + (speed_slider_bounds.height * 2), slider_width, 10};
-    if(GuiSliderBar(volume_slider_bounds, "VOLUME", "", music_volume, 0, 1))
+    if(GuiSliderBar(VOLUME_BOUNDS, "VOLUME", "", music_volume, 0, 1))
         SetMusicVolume(*music, *music_volume);
 
-    const Rectangle pan_slider_bounds = {container.width - (slider_width * 1.50), volume_slider_bounds.y + (volume_slider_bounds.height * 2), slider_width, 10};
-    if(GuiSliderBar(pan_slider_bounds, "PAN", "", audio_pan, 0, 1))
+    if(GuiSliderBar(PAN_BOUNDS, "PAN", "", audio_pan, 0, 1))
         SetMusicPan(*music, *audio_pan);
 }
 
@@ -401,13 +405,14 @@ void reverse_string(int len, char string[])
 char* itoa(int value, int maxlen, char string[])
 {
     bool neagtive_number = value < 0;
+    value = abs(value);
 
     int i = 0;
     if(!value)
         string[i++] = 0;
 
     else {
-        for(; value && i < maxlen; i++, value /= 10)
+        for(; value && i < maxlen - 1 - neagtive_number; i++, value /= 10)
             string[i] = (value % 10) + '0';
     }
 
@@ -415,7 +420,7 @@ char* itoa(int value, int maxlen, char string[])
         string[i++] = '-';
 
     string[i] = '\0';
-    reverse_string(strlen(string), string);
+    reverse_string(i, string);
     return string;
 }
 
@@ -423,7 +428,7 @@ int main()
 {   
     // pointers to current playlist and song
     int song_index, playlist_index;
-    playlist_index = song_index = 1;
+    playlist_index = song_index = 3;
 
     // the size of both playlist and current song libraries
     int playlists_read, songs_read;
@@ -483,10 +488,6 @@ int main()
     // updating full song path
     sprintf(full_song_path, "%s/%s", current_playlist_path, current_song);
     
-    char fullpath_buffer[LEN * 3];
-    sprintf(fullpath_buffer, "%s/", current_playlist_path);
-    int starting_point = strlen(fullpath_buffer);
-
     if(extract_metadata(LEN, artist_name, full_song_path, "artist") < 0)    
         artist_name[0] = '\0';
 
@@ -521,14 +522,11 @@ int main()
     for(int i = 0, y_level = 0; i < songs_read; i++, y_level += 30) 
         content_rectangles[i] = (Rectangle){0, y_level, GetScreenWidth(), 30};
     
-    // bounds of scroll panel window
+    // bounds of scroll panel window and content
     Rectangle panelRec;
-    
-    // bounds of content
-    Rectangle panelContentRec = (Rectangle){0, 0, GetScreenWidth(), (content_rectangles->height * songs_read)}; ;
+    Rectangle panelContentRec = (Rectangle){0, 0, GetScreenWidth(), (content_rectangles->height * songs_read)};
 
     Rectangle panelView = {0, 0};
-
     Vector2 panelScroll = {99, -20};
 
     while(!WindowShouldClose()) {
@@ -555,7 +553,9 @@ int main()
             PlayMusicStream(music);
         }
 
-        if(flags.change_song) { 
+        bool update_song = flags.skip_song || flags.rewind_song || flags.change_song;
+
+        if(update_song) { 
             flags.change_song = false;
             
             if(flags.skip_song) {
@@ -625,50 +625,46 @@ int main()
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
-            const float bar_height = 80.00; 
-            const Rectangle bottom_bar_bounds = (Rectangle) {0, GetScreenHeight() - bar_height, GetScreenWidth(), bar_height};
+            const float BAR_HEIGHT = 80.00; 
+            const Rectangle BOTTOM_BAR_BOUNDS = (Rectangle) {0, GetScreenHeight() - BAR_HEIGHT, GetScreenWidth(), BAR_HEIGHT};
 
             // BODY
             {
                 const float SCROLL_BAR_WIDTH = 12;
 
-                panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() - bottom_bar_bounds.height + SCROLL_BAR_WIDTH};
+                panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight()};
                 GuiScrollPanel(panelRec, NULL, panelContentRec, &panelScroll, &panelView);
 
                 bool scrollbar_visible = panelContentRec.height > GetScreenHeight();
                 
-                for(int i = 0; i < songs_read; i++)
-                {
-                    // the updated bounds of the rectangle from scrolling, only y and width are adjusted each frame
+                char buffer[LEN];
+                for(int i = 0; i < songs_read; i++) {
+                    // the updated bounds of the rectangle from scrolling 
                     Rectangle adjusted_content_rectangle = content_rectangles[i];
-
+                    
+                    // only y and width are adjusted each frame
                     adjusted_content_rectangle.y += panelScroll.y;
                     adjusted_content_rectangle.width = GetScreenWidth();
                     if(scrollbar_visible)
                         adjusted_content_rectangle.width -= SCROLL_BAR_WIDTH;  
 
-                    char buffer[LEN];
                     Color color = (i == song_index) ? GREEN : BLACK;
-                        
-                    if((adjusted_content_rectangle.y + adjusted_content_rectangle.height) < bottom_bar_bounds.y) {
-                        if(CheckCollisionPointRec(GetMousePosition(), adjusted_content_rectangle)) {
-                            color = RED;
 
-                            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                                if(i == song_index)
-                                    flags.restart_song = true;
-                                else {
-                                    flags.change_song = true;
-
-                                    if(flags.shuffle_play) {
-                                        song_history = 0;
-                                        create_song_queue(songs_read, i, shuffled_song_queue);
-                                    }
-
-                                    song_index = i;
+                    if(!CheckCollisionRecs(adjusted_content_rectangle, BOTTOM_BAR_BOUNDS)) {
+                        if(CheckCollisionPointRec(GetMousePosition(), adjusted_content_rectangle) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                            if(i == song_index)
+                                flags.restart_song = true;
+                            
+                            else {
+                                if(flags.shuffle_play) {
+                                    song_history = 0;
+                                    create_song_queue(songs_read, i, shuffled_song_queue);
                                 }
+
+                                flags.change_song = true;
+                                song_index = i;
                             }
-                        }
+                       }
 
                         DrawText(itoa(i + 1, LEN, buffer), 15, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
                         DrawText(songs[i], 60, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
@@ -678,26 +674,30 @@ int main()
 
             // BOTTOM BAR
             {
-                const float image_padding = (bar_height - IMG_SIZE) / 2.00;
-                DrawRectanglePro(bottom_bar_bounds, (Vector2){0,0}, 0.0f, LIGHTGRAY);
+                const float IMG_PADDING = (BAR_HEIGHT - IMG_SIZE) / 2.00;
+            
+                DrawRectanglePro(BOTTOM_BAR_BOUNDS, (Vector2){0,0}, 0.0f, LIGHTGRAY);
                 
-                // song cover image
-                DrawTexture(song_image, image_padding, (bottom_bar_bounds.y + image_padding), RAYWHITE);
-
+                // drawing the song image
+                DrawTextureEx(song_image, (Vector2){ IMG_PADDING, (BOTTOM_BAR_BOUNDS.y + IMG_PADDING) }, 0.0f, 1.0f, RAYWHITE);
+                
                 // song information
-                float text_starting_point = bottom_bar_bounds.x + (image_padding * 2.00) + IMG_SIZE;
-                DrawText(current_playlist, text_starting_point, bottom_bar_bounds.y + 10, 20, BLACK);
-                DrawText(song_title, text_starting_point, bottom_bar_bounds.y + 35, 15, BLACK);
-                DrawText(artist_name, text_starting_point, bottom_bar_bounds.y + 55, 8, BLACK);
-                
-                // pause, rewind, and skip buttons
-                playback_buttons(bottom_bar_bounds, music, &flags);
+                float text_starting_point = BOTTOM_BAR_BOUNDS.x + (IMG_PADDING * 2.00) + IMG_SIZE;
+                DrawText(current_playlist, text_starting_point, BOTTOM_BAR_BOUNDS.y + 10, 20, BLACK);
+                DrawText(song_title, text_starting_point, BOTTOM_BAR_BOUNDS.y + 35, 13, BLACK);
+                DrawText(artist_name, text_starting_point, BOTTOM_BAR_BOUNDS.y + 55, 8, BLACK);
+
+                // playback buttons 
+                flags.play_music = pause_button(BOTTOM_BAR_BOUNDS, flags.play_music);
+                bool song_over = (!IsMusicStreamPlaying(music) && flags.play_music);
+                flags.skip_song = skip_button(BOTTOM_BAR_BOUNDS, song_over);
+                rewind_button(BOTTOM_BAR_BOUNDS, GetMusicTimePlayed(music), &flags.change_song, &flags.rewind_song, &flags.restart_song);
 
                 // progress bar
-                progress_bar(bottom_bar_bounds, &flags, &percentage_played, GetMusicTimePlayed(music), GetMusicTimeLength(music));
+                progress_bar(BOTTOM_BAR_BOUNDS, &flags, &percentage_played, GetMusicTimePlayed(music), GetMusicTimeLength(music));
 
                 // music control sliders
-                music_settings(bottom_bar_bounds, &music, &pitch, &volume, &pan);
+                music_settings(BOTTOM_BAR_BOUNDS, &music, &pitch, &volume, &pan);
             }
 
             if(flags.shuffle_play)

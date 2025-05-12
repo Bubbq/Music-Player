@@ -14,12 +14,9 @@
 #define LEN 256
 #define NSONGS 100
 #define NPLAYLIST 100
-#define IMG_SIZE 68
+#define IMG_SIZE 70
 
-const char* MUSIC_SAVE = "saved_music.txt"; 
-const char* PLAYLIST_DIR = "/home/bubbq/Music"; 
-const char* MP3_COVER_PATH = "/home/bubbq/.cache/mp3_covers";
-const char* DEFAULT_IMG = "default.png";
+const char* DEFAULT_IMG_PATH = "default.png";
 
 typedef struct
 {
@@ -38,8 +35,10 @@ typedef struct
     Texture2D cover;
     char title[LEN];
     char artist[LEN];
+    char duration[LEN];
+    char album[LEN];
     bool information_ready;
-} SongMetadata;
+} SongInformation;
 
 // comparator function needed for qsort
 int cmp(const void* a, const void* b)
@@ -130,7 +129,7 @@ void shuffle_array(int size, int array[])
 }
 
 // a song queue for shuffle play
-void create_song_queue(int nsongs, int current_song_index, int queue[])
+void create_song_queue(int nsongs, int current_song_index, int queue[nsongs])
 {
     queue[0] = current_song_index;
 
@@ -158,7 +157,7 @@ void init_app()
 // loads mp3 file specified in full_song_path
 void load_new_song(Music* music, char* full_song_path, float pitch, float volume, float pan)
 {
-    if(music->ctxData && IsMusicStreamPlaying(*music)) {
+    if(IsMusicReady(*music) && IsMusicStreamPlaying(*music)) {
         StopMusicStream(*music);
         UnloadMusicStream(*music);
     }
@@ -210,6 +209,7 @@ void rewind_button(Rectangle container, float time_played, bool* change_song, bo
 {
     // the amount of time that needs to be played to restart rather than rewind
     const float THRESHOLD = 3.00;
+
     const int BUTTON_SIZE = 20;
     const float Y_LEVEL = container.y + ((container.height - BUTTON_SIZE) / 2.00);
     const Rectangle REWIND = (Rectangle){(GetScreenWidth() / 2.00) - (BUTTON_SIZE * 2.00), Y_LEVEL, BUTTON_SIZE, BUTTON_SIZE};
@@ -282,81 +282,95 @@ int extract_cover_image(AVFormatContext* format_context, const char* output_jpeg
         AVStream *stream = format_context->streams[i];
         if (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) {
             AVPacket pkt = stream->attached_pic;
-
             FILE *f = fopen(output_jpeg_path, "wb");
-
-            if (!f) {
-                avformat_close_input(&format_context);
+            if (!f) 
                 return -1;
-            }
-
             fwrite(pkt.data, 1, pkt.size, f);
             fclose(f);
 
-            avformat_close_input(&format_context);
             return 0;  
         }
     }
 
     // no picture extracted case
-    printf("no image from \"%s\"\n", format_context->url);
-    avformat_close_input(&format_context);
+    printf("no image extracted from \"%s\"\n", format_context->url);
     return -1;
 }
 
-// given a songname, writes the appropraite cover path to dst
-int get_cover_path(int maxlen, const char* song_title, char dst[maxlen])
+// given a songname, write the appropraite cover path to dst
+int get_cover_path(int maxlen, const char* song_title, const char* cover_directory_path, char dst[maxlen])
 {
     const char* JPEG = ".jpg";
     const int JPEG_LEN = strlen(JPEG); 
 
-    sprintf(dst, "%s/%s", MP3_COVER_PATH, song_title);
+    sprintf(dst, "%s/%s", cover_directory_path, song_title);
     int len = strlen(dst);
 
-    if(len + JPEG_LEN >= (maxlen - 1))
+    if(len + JPEG_LEN >= maxlen) {
+        printf("the cover path \"%s.jpg\" is longer than the passed maxlen\n", dst);
+        dst[0] = '\0';
         return -1;
+    }
 
     else {
         strcpy((dst + len), JPEG);
-        len += JPEG_LEN;
-        dst[len] = '\0';
-
         return 0;
     }
 }
 
-Texture2D get_song_cover(AVFormatContext* song_context, const char* song_title, int image_size)
+Texture2D get_song_cover(AVFormatContext* song_context, const char* song_title, const char* cover_directory_path, int image_size)
 {
-    // where image is written to 
+    // get the cover path and write the song cover to it
     char cover_path[LEN * 2];
+    int cover_path_status = get_cover_path((LEN * 2), song_title, cover_directory_path, cover_path);
+    int extract_cover_status = extract_cover_image(song_context, cover_path);
 
     Image image = { 0 };
-    Texture2D ret =  { 0 };
+    int error = (cover_path_status < 0) || (extract_cover_status < 0);
 
-    // get the ouput path of the new image
-    if(get_cover_path((LEN * 2), song_title, cover_path) < 0)
-        image = LoadImage(DEFAULT_IMG);
-    
-    // write the cover image to the output path and load it
-    else {
-        if(extract_cover_image(song_context, cover_path) < 0)
-            image = LoadImage(DEFAULT_IMG);
-        else
-            image = LoadImage(cover_path);
-    }
+    if(error)
+        image = LoadImage(DEFAULT_IMG_PATH);
+    else
+        image = LoadImage(cover_path);
 
-    // resize image and return texture
     ImageResize(&image, image_size, image_size);
-    ret = LoadTextureFromImage(image);
+    
+    Texture2D ret =  LoadTextureFromImage(image);
 
-    UnloadImage(image);
+    if(IsImageReady(image))
+        UnloadImage(image);
+
     return ret;
 }
 
+// write a parameter of a stream's metadata to dst
+int get_metadata_parameter(AVDictionary* stream_metadata, const char* parameter, int maxlen, char dst[maxlen])
+{
+    AVDictionaryEntry* tag = av_dict_get(stream_metadata, parameter, NULL, AV_DICT_IGNORE_SUFFIX);
+
+    if(tag) {
+        if(strlen(tag->value) < maxlen) {
+            strcpy(dst, tag->value);
+            return 0;
+        }
+
+        else {
+            printf("\"%s\" from the parameter \"%s\" was too large to fit in destination string\n", tag->value, parameter);
+            return -1;
+        }
+    }
+
+    else {
+        printf("the parameter \"%s\" was not found in the stream's metadata\n", parameter);
+        return -1;
+    }
+}
+
 // returns the context in an audio or video file
-AVFormatContext* get_stream_context(const char *path)
+AVFormatContext* get_format_context(const char *path)
 {
     AVFormatContext *format_context = NULL;
+
     if (avformat_open_input(&format_context, path, NULL, NULL) < 0) {
         printf("error opening the file \"%s\"\n", path);
         return NULL;
@@ -371,57 +385,45 @@ AVFormatContext* get_stream_context(const char *path)
     return format_context;
 }
 
-// write a parameter of a stream's metadata to dst
-int get_metadata_paramter(AVDictionary* stream_metadata, const char* parameter, int maxlen, char dst[maxlen])
-{
-    AVDictionaryEntry* tag = av_dict_get(stream_metadata, parameter, NULL, AV_DICT_IGNORE_SUFFIX);
-
-    if(tag) {
-        snprintf(dst, maxlen, "%s", tag->value);
-        return 0;
-    }
-
-    else {
-        printf("the parameter \"%s\" was not found in the stream's metadata\n", parameter);
-        return -1;
-    }
-}
-
 // get all the information for a song
-void get_song_metadata(SongMetadata* song_metadata, const char* full_song_path)
+void get_song_metadata(SongInformation* song_information, const char* full_song_path, const char* cover_directory_path)
 {
     // get the metadata from the audio/video path
-    AVFormatContext* format_context = get_stream_context(full_song_path);
+    AVFormatContext* format_context = get_format_context(full_song_path);
     AVDictionary* metadata = format_context->metadata;
     
-    const char* DEFAULT_ARTIST = "artist";
-    const char* DEFAULT_TITLE = "song";
+    const char* DEFAULT = "---";
 
     // getting artist name
-    if(get_metadata_paramter(metadata, "artist", LEN, song_metadata->artist) < 0)
-        strcpy(song_metadata->artist, DEFAULT_ARTIST);
+    if(get_metadata_parameter(metadata, "artist", LEN, song_information->artist) < 0)
+        strcpy(song_information->artist, DEFAULT);
 
     // getting song title
-    if(get_metadata_paramter(metadata, "title", LEN, song_metadata->title) < 0)
-        strcpy(song_metadata->title, DEFAULT_TITLE);
+    if(get_metadata_parameter(metadata, "title", LEN, song_information->title) < 0)
+        strcpy(song_information->title, DEFAULT);
 
-    song_metadata->cover = get_song_cover(format_context, song_metadata->title, IMG_SIZE);
-    song_metadata->information_ready = true;
+    if(get_metadata_parameter(metadata, "album", LEN, song_information->album) < 0)
+        strcpy(song_information->album, DEFAULT);
+
+    // song cover
+    song_information->cover = get_song_cover(format_context, song_information->title, cover_directory_path, IMG_SIZE);
+
+    // song duration
+    const float MICRO_TO_SECONDS = 0.000001;
+    seconds_to_string((format_context->duration * MICRO_TO_SECONDS), song_information->duration);
+    
+    song_information->information_ready = true;
+
+    avformat_close_input(&format_context);
 }
 
 int main()
 {   
-    SongMetadata song_metadata[NSONGS] = { 0 };
-    for(int i = 0; i < NSONGS; i++) {
-        memset(song_metadata[i].artist, 0, LEN);
-        memset(song_metadata[i].title, 0, LEN);
-        song_metadata[i].cover = (Texture2D){ 0 };
-        song_metadata[i].information_ready = false;
-    }
+    SongInformation song_information[NSONGS] = { 0 };
 
     // pointers to current playlist and song
-    int song_index, playlist_index;
-    playlist_index = song_index = 0;
+    int current_song_index, current_playlist_index;
+    current_playlist_index = current_song_index = 1;
 
     // the size of both playlist and current song libraries
     int playlists_read, songs_read;
@@ -437,12 +439,21 @@ int main()
     int shuffled_song_queue[NSONGS];
     int song_history = 0;
 
-    // creating the cover path
-    if(!directory_exists(MP3_COVER_PATH))
-        make_directory(MP3_COVER_PATH);
+    const char* HOME_DIRECTORY = getenv("HOME");
 
-    if((playlists_read = get_files_from_folder(LEN, NPLAYLIST, playlists, PLAYLIST_DIR, DT_DIR)) == 0) {
-        printf("there are no folders to represent playlists in \"%s\", please add some\n", PLAYLIST_DIR);
+    // path to folder where covers are stored
+    char cover_directory_path[LEN];
+    sprintf(cover_directory_path, "%s/.cache/mp3_covers", HOME_DIRECTORY);
+
+    // path to folder where playlists (directorys holding mp3s) are held
+    char playlist_directory[LEN];
+    sprintf(playlist_directory, "%s/Music", HOME_DIRECTORY);
+    
+    if(!directory_exists(cover_directory_path))
+        make_directory(cover_directory_path);
+
+    if((playlists_read = get_files_from_folder(LEN, NPLAYLIST, playlists, playlist_directory, DT_DIR)) == 0) {
+        printf("there are no folders to represent playlists in \"%s\", please add some\n", playlist_directory);
         return 1;
     }
 
@@ -450,7 +461,7 @@ int main()
 
     // full path to the current playlist 
     char current_playlist_path[LEN * 2];
-    sprintf(current_playlist_path, "%s/%s", PLAYLIST_DIR, playlists[playlist_index]);
+    sprintf(current_playlist_path, "%s/%s", playlist_directory, playlists[current_playlist_index]);
 
     // getting all mp3s from the current playlist
     int potential_songs = get_files_from_folder(LEN, NSONGS, songs, current_playlist_path, DT_REG);
@@ -464,15 +475,19 @@ int main()
 
     // the full path of the current song
     char full_song_path[LEN * 3];
-    sprintf(full_song_path, "%s/%s", current_playlist_path, songs[song_index]);
+    sprintf(full_song_path, "%s/%s", current_playlist_path, songs[current_song_index]);
 
     init_app();
 
-    if(song_metadata[song_index].information_ready == false)
-        get_song_metadata(&song_metadata[song_index], full_song_path);
-    
+    get_song_metadata(&song_information[current_song_index], full_song_path, cover_directory_path);
+
+    // for(int i  = 0; i < songs_read; i++) {
+    //     sprintf(full_song_path, "%s/%s", current_playlist_path, songs[i]);
+    //     get_song_metadata((song_information + i), full_song_path, cover_directory_path);
+    // }    
+
     // music control flags
-    Flags flags = {false}; 
+    Flags flags = { false }; 
 
     // the speed of the music being played
     float percentage_played = 0.00;
@@ -480,7 +495,7 @@ int main()
     float volume = 0.50;
     float pan = 0.50;
 
-    Music music = {0};
+    Music music = { 0 };
     load_new_song(&music, full_song_path, pitch, volume, pan);
     PlayMusicStream(music);
 
@@ -489,14 +504,13 @@ int main()
 
     // setting the inital positions
     for(int i = 0, y_level = 0; i < songs_read; i++, y_level += 30) 
-        content_rectangles[i] = (Rectangle){0, y_level, GetScreenWidth(), 30};
+        content_rectangles[i] = (Rectangle){ 0, y_level, GetScreenWidth(), 30 };
     
-    // bounds of scroll panel window and content
-    Rectangle panelRec;
-    Rectangle panelContentRec = (Rectangle){0, 0, GetScreenWidth(), (content_rectangles->height * songs_read)};
+    // bounds of content
+    Rectangle panelContentRec = (Rectangle){ 0, 0, GetScreenWidth(), (content_rectangles->height * songs_read) };
 
-    Rectangle panelView = {0, 0};
-    Vector2 panelScroll = {99, -20};
+    Rectangle panelView = { 0, 0 };
+    Vector2 panelScroll = { 99, -20 };
 
     while(!WindowShouldClose()) {
         // toggling shuffle mode
@@ -505,19 +519,19 @@ int main()
 
             if(flags.shuffle_play) {
                 song_history = 0;
-                create_song_queue(songs_read, song_index, shuffled_song_queue);
+                create_song_queue(songs_read, current_song_index, shuffled_song_queue);
             }
         }
 
         if(flags.update_song_position) {
             flags.update_song_position = false;
-            SeekMusicStream(music, GetMusicTimeLength(music) * percentage_played);
+            if(IsMusicReady(music))
+                SeekMusicStream(music, GetMusicTimeLength(music) * percentage_played);
         }
 
         // restarting current music stream
         if(flags.restart_song) {
             flags.restart_song = false;
-
             StopMusicStream(music);
             PlayMusicStream(music);
         }
@@ -533,17 +547,17 @@ int main()
                 if(flags.shuffle_play) {
                     if(song_history >= songs_read - 1) { 
                         int first_song;
-                        while((first_song = GetRandomValue(0, (songs_read - 1))) == song_index)
+                        while((first_song = GetRandomValue(0, (songs_read - 1))) == current_song_index)
                             ;
                         create_song_queue(songs_read, first_song, shuffled_song_queue);
                         song_history = -1;
                     }
 
-                    song_index = shuffled_song_queue[++song_history];
+                    current_song_index = shuffled_song_queue[++song_history];
                 }
 
                 else
-                    song_index++;
+                    current_song_index++;
             }
 
             else if(flags.rewind_song) {
@@ -553,22 +567,21 @@ int main()
                     if(song_history)
                         song_history--;
                     
-                    song_index = shuffled_song_queue[song_history];
+                    current_song_index = shuffled_song_queue[song_history];
                 }
 
                 else
-                    song_index--;
+                    current_song_index--;
             }
             
             flags.play_music = true;
 
-            // updating index and strings
-            song_index = adjust_index(song_index, songs_read);
-            // strcpy(current_song, songs[song_index]);
-            sprintf(full_song_path, "%s/%s", current_playlist_path, songs[song_index]);
+            // updating index and full song path
+            current_song_index = adjust_index(current_song_index, songs_read);
+            sprintf(full_song_path, "%s/%s", current_playlist_path, songs[current_song_index]);
 
-            if(song_metadata[song_index].information_ready == false)
-                get_song_metadata(&song_metadata[song_index], full_song_path);
+            if(song_information[current_song_index].information_ready == false)
+                get_song_metadata(&song_information[current_song_index], full_song_path, cover_directory_path);
             
             // playing new song
             load_new_song(&music, full_song_path, pitch, volume, pan);
@@ -576,7 +589,7 @@ int main()
         }
 
         // playing music
-        if(flags.play_music)
+        if(flags.play_music && IsMusicReady(music))
             UpdateMusicStream(music);
 
         if(!flags.holding_progess_bar_slider)
@@ -591,11 +604,12 @@ int main()
             // BODY
             {
                 const float SCROLL_BAR_WIDTH = 12;
-
-                panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight()};
-                GuiScrollPanel(panelRec, NULL, panelContentRec, &panelScroll, &panelView);
-
+                
                 bool scrollbar_visible = panelContentRec.height > GetScreenHeight();
+                
+                Rectangle panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() - BAR_HEIGHT };
+
+                GuiScrollPanel(panelRec, NULL, panelContentRec, &panelScroll, &panelView);
                 
                 for(int i = 0; i < songs_read; i++) {
                     // the updated bounds of the rectangle from scrolling 
@@ -607,11 +621,11 @@ int main()
                     if(scrollbar_visible)
                         adjusted_content_rectangle.width -= SCROLL_BAR_WIDTH;  
 
-                    Color color = (i == song_index) ? GREEN : BLACK;
+                    Color color = (i == current_song_index) ? GREEN : BLACK;
 
                     if(!CheckCollisionRecs(adjusted_content_rectangle, BOTTOM_BAR_BOUNDS)) {
                         if(CheckCollisionPointRec(GetMousePosition(), adjusted_content_rectangle) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                            if(i == song_index)
+                            if(i == current_song_index)
                                 flags.restart_song = true;
                             
                             else {
@@ -621,11 +635,15 @@ int main()
                                 }
 
                                 flags.change_song = true;
-                                song_index = i;
+                                current_song_index = i;
                             }
                        }
 
                         DrawText(songs[i], 15, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
+                        // DrawText(song_information[i].title, (GetScreenWidth() * 0.25) - (MeasureText(song_information[i].title, 10) * 0.50), adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
+                        // DrawText(song_information[i].artist, (GetScreenWidth() * 0.50) - (MeasureText(song_information[i].artist, 10) * 0.50), adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
+                        // DrawText(song_information[i].album, (GetScreenWidth() * 0.75) - (MeasureText(song_information[i].album, 10) * 0.50), adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
+                        // DrawText(song_information[i].duration, adjusted_content_rectangle.width - MeasureText(song_information[i].duration, 10) - 15, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
                     }
                 }
             }  
@@ -637,14 +655,14 @@ int main()
                 // drawing song cover
                 const float IMG_PADDING = (BAR_HEIGHT - IMG_SIZE) / 2.00;
                 const Vector2 IMG_LOCATION = { IMG_PADDING, BOTTOM_BAR_BOUNDS.y + IMG_PADDING };
-                if(IsTextureReady(song_metadata[song_index].cover))
-                    DrawTextureEx(song_metadata[song_index].cover, IMG_LOCATION, 0.0f, 1.0f, RAYWHITE);
+                if(IsTextureReady(song_information[current_song_index].cover))
+                    DrawTextureEx(song_information[current_song_index].cover, IMG_LOCATION, 0.0f, 1.0f, RAYWHITE);
                 
                 // song information
                 float text_starting_point = BOTTOM_BAR_BOUNDS.x + (IMG_PADDING * 2.00) + IMG_SIZE;
-                DrawText(playlists[playlist_index], text_starting_point, BOTTOM_BAR_BOUNDS.y + 10, 20, BLACK);
-                DrawText(song_metadata[song_index].title, text_starting_point, BOTTOM_BAR_BOUNDS.y + 35, 13, BLACK);
-                DrawText(song_metadata[song_index].artist, text_starting_point, BOTTOM_BAR_BOUNDS.y + 55, 8, BLACK);
+                DrawText(playlists[current_playlist_index], text_starting_point, BOTTOM_BAR_BOUNDS.y + 10, 20, BLACK);
+                DrawText(song_information[current_song_index].title, text_starting_point, BOTTOM_BAR_BOUNDS.y + 35, 13, BLACK);
+                DrawText(song_information[current_song_index].artist, text_starting_point, BOTTOM_BAR_BOUNDS.y + 55, 8, BLACK);
 
                 // playback buttons 
                 flags.play_music = pause_button(BOTTOM_BAR_BOUNDS, flags.play_music);
@@ -666,10 +684,10 @@ int main()
     }
 
     for(int i = 0; i < NSONGS; i++)
-        if((song_metadata[i].information_ready) && IsTextureReady(song_metadata[i].cover))
-            UnloadTexture(song_metadata[i].cover);
+        if((song_information[i].information_ready) && IsTextureReady(song_information[i].cover))
+            UnloadTexture(song_information[i].cover);
 
-    if(music.ctxData && IsMusicStreamPlaying(music)) {
+    if(IsMusicReady(music) && IsMusicStreamPlaying(music)) {
         StopMusicStream(music);
         UnloadMusicStream(music);
     }
@@ -680,5 +698,6 @@ int main()
 }
 
 // TODO
+// fix last song not showing up, only when scrollbar is there
+// save music and load it
 // clean new song loading process
-// test if images are the same and make a new textture struct that has only unique textures?

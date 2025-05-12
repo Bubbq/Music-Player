@@ -35,8 +35,8 @@ typedef struct
     Texture2D cover;
     char title[LEN];
     char artist[LEN];
-    char duration[LEN];
     char album[LEN];
+    char genre[LEN];
     bool information_ready;
 } SongInformation;
 
@@ -146,7 +146,7 @@ void create_song_queue(int nsongs, int current_song_index, int queue[nsongs])
 void init_app()
 {
     srand(time(NULL));
-    // SetTraceLogLevel(LOG_ERROR);
+    SetTraceLogLevel(LOG_ERROR);
     SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(750,750, "music player");
@@ -322,6 +322,7 @@ Texture2D get_song_cover(AVFormatContext* song_context, const char* song_title, 
 {
     // get the cover path and write the song cover to it
     char cover_path[LEN * 2];
+
     int cover_path_status = get_cover_path((LEN * 2), song_title, cover_directory_path, cover_path);
     int extract_cover_status = extract_cover_image(song_context, cover_path);
 
@@ -386,7 +387,7 @@ AVFormatContext* get_format_context(const char *path)
 }
 
 // get all the information for a song
-void get_song_metadata(SongInformation* song_information, const char* full_song_path, const char* cover_directory_path)
+void get_song_information(SongInformation* song_information, const char* full_song_path, const char* cover_directory_path)
 {
     // get the metadata from the audio/video path
     AVFormatContext* format_context = get_format_context(full_song_path);
@@ -394,23 +395,13 @@ void get_song_metadata(SongInformation* song_information, const char* full_song_
     
     const char* DEFAULT = "---";
 
-    // getting artist name
-    if(get_metadata_parameter(metadata, "artist", LEN, song_information->artist) < 0)
-        strcpy(song_information->artist, DEFAULT);
-
-    // getting song title
-    if(get_metadata_parameter(metadata, "title", LEN, song_information->title) < 0)
-        strcpy(song_information->title, DEFAULT);
-
-    if(get_metadata_parameter(metadata, "album", LEN, song_information->album) < 0)
-        strcpy(song_information->album, DEFAULT);
+    if(get_metadata_parameter(metadata, "artist", LEN, song_information->artist) < 0) strcpy(song_information->artist, DEFAULT);
+    if(get_metadata_parameter(metadata, "title", LEN, song_information->title) < 0) strcpy(song_information->title, DEFAULT);
+    if(get_metadata_parameter(metadata, "album", LEN, song_information->album) < 0) strcpy(song_information->album, DEFAULT);
+    if(get_metadata_parameter(metadata, "genre", LEN, song_information->genre) < 0) strcpy(song_information->genre, DEFAULT);
 
     // song cover
     song_information->cover = get_song_cover(format_context, song_information->title, cover_directory_path, IMG_SIZE);
-
-    // song duration
-    const float MICRO_TO_SECONDS = 0.000001;
-    seconds_to_string((format_context->duration * MICRO_TO_SECONDS), song_information->duration);
     
     song_information->information_ready = true;
 
@@ -471,20 +462,18 @@ int main()
         return 1;
     }
 
-    qsort(songs, songs_read, LEN, cmp);
+    init_app();
 
     // the full path of the current song
     char full_song_path[LEN * 3];
+
+    // load all song information for the current playlist
+    for(int i  = 0; i < songs_read; i++) {
+        sprintf(full_song_path, "%s/%s", current_playlist_path, songs[i]);
+        get_song_information((song_information + i), full_song_path, cover_directory_path);
+    }    
+
     sprintf(full_song_path, "%s/%s", current_playlist_path, songs[current_song_index]);
-
-    init_app();
-
-    get_song_metadata(&song_information[current_song_index], full_song_path, cover_directory_path);
-
-    // for(int i  = 0; i < songs_read; i++) {
-    //     sprintf(full_song_path, "%s/%s", current_playlist_path, songs[i]);
-    //     get_song_metadata((song_information + i), full_song_path, cover_directory_path);
-    // }    
 
     // music control flags
     Flags flags = { false }; 
@@ -503,16 +492,18 @@ int main()
     Rectangle content_rectangles[NSONGS];
 
     // setting the inital positions
-    for(int i = 0, y_level = 0; i < songs_read; i++, y_level += 30) 
-        content_rectangles[i] = (Rectangle){ 0, y_level, GetScreenWidth(), 30 };
+    const float CONTENT_HEIGHT = 30;
+    for(int i = 0, y_level = CONTENT_HEIGHT; i < songs_read; i++, y_level += CONTENT_HEIGHT) 
+        content_rectangles[i] = (Rectangle){ 0, y_level, GetScreenWidth(), CONTENT_HEIGHT };
     
     // bounds of content
-    Rectangle panelContentRec = (Rectangle){ 0, 0, GetScreenWidth(), (content_rectangles->height * songs_read) };
+    Rectangle panelContentRec = (Rectangle){ 0, CONTENT_HEIGHT, GetScreenWidth(), (content_rectangles->height * (songs_read + 1)) };
 
     Rectangle panelView = { 0, 0 };
     Vector2 panelScroll = { 99, -20 };
 
     while(!WindowShouldClose()) {
+
         // toggling shuffle mode
         if(IsKeyPressed(KEY_X)) {
             flags.shuffle_play = !flags.shuffle_play;
@@ -523,134 +514,159 @@ int main()
             }
         }
 
-        if(flags.update_song_position) {
-            flags.update_song_position = false;
-            if(IsMusicReady(music))
+        if(IsMusicReady(music)) {
+            if(flags.update_song_position) {
+                flags.update_song_position = false;
                 SeekMusicStream(music, GetMusicTimeLength(music) * percentage_played);
-        }
+            }
 
-        // restarting current music stream
-        if(flags.restart_song) {
-            flags.restart_song = false;
-            StopMusicStream(music);
-            PlayMusicStream(music);
-        }
+            // restarting current music stream
+            if(flags.restart_song) {
+                flags.restart_song = false;
+                StopMusicStream(music);
+                PlayMusicStream(music);
+            }
 
-        bool update_song = flags.skip_song || flags.rewind_song || flags.change_song;
+            bool update_song = flags.skip_song || flags.rewind_song || flags.change_song;
+            if(update_song) { 
+                flags.change_song = false;
+                
+                if(flags.skip_song) {
+                    flags.skip_song = false;
 
-        if(update_song) { 
-            flags.change_song = false;
-            
-            if(flags.skip_song) {
-                flags.skip_song = false;
+                    if(flags.shuffle_play) {
+                        if(song_history >= songs_read - 1) { 
+                            int first_song;
+                            while((first_song = GetRandomValue(0, (songs_read - 1))) == current_song_index)
+                                ;
+                            create_song_queue(songs_read, first_song, shuffled_song_queue);
+                            song_history = -1;
+                        }
 
-                if(flags.shuffle_play) {
-                    if(song_history >= songs_read - 1) { 
-                        int first_song;
-                        while((first_song = GetRandomValue(0, (songs_read - 1))) == current_song_index)
-                            ;
-                        create_song_queue(songs_read, first_song, shuffled_song_queue);
-                        song_history = -1;
+                        current_song_index = shuffled_song_queue[++song_history];
                     }
 
-                    current_song_index = shuffled_song_queue[++song_history];
+                    else
+                        current_song_index++;
                 }
 
-                else
-                    current_song_index++;
-            }
+                else if(flags.rewind_song) {
+                    flags.rewind_song = false;
 
-            else if(flags.rewind_song) {
-                flags.rewind_song = false;
+                    if(flags.shuffle_play) {
+                        if(song_history)
+                            song_history--;
+                        
+                        current_song_index = shuffled_song_queue[song_history];
+                    }
 
-                if(flags.shuffle_play) {
-                    if(song_history)
-                        song_history--;
-                    
-                    current_song_index = shuffled_song_queue[song_history];
+                    else
+                        current_song_index--;
                 }
+                
+                flags.play_music = true;
 
-                else
-                    current_song_index--;
+                // updating index and full song path
+                current_song_index = adjust_index(current_song_index, songs_read);
+                sprintf(full_song_path, "%s/%s", current_playlist_path, songs[current_song_index]);
+
+                if(song_information[current_song_index].information_ready == false)
+                    get_song_information(&song_information[current_song_index], full_song_path, cover_directory_path);
+                
+                // playing new song
+                load_new_song(&music, full_song_path, pitch, volume, pan);
+                PlayMusicStream(music);
             }
-            
-            flags.play_music = true;
 
-            // updating index and full song path
-            current_song_index = adjust_index(current_song_index, songs_read);
-            sprintf(full_song_path, "%s/%s", current_playlist_path, songs[current_song_index]);
-
-            if(song_information[current_song_index].information_ready == false)
-                get_song_metadata(&song_information[current_song_index], full_song_path, cover_directory_path);
-            
-            // playing new song
-            load_new_song(&music, full_song_path, pitch, volume, pan);
-            PlayMusicStream(music);
+            // playing music
+            if(flags.play_music)
+                UpdateMusicStream(music);
         }
 
-        // playing music
-        if(flags.play_music && IsMusicReady(music))
-            UpdateMusicStream(music);
-
         if(!flags.holding_progess_bar_slider)
-            percentage_played = (GetMusicTimePlayed(music) / GetMusicTimeLength(music));
-
-        BeginDrawing();
+                    percentage_played = (GetMusicTimePlayed(music) / GetMusicTimeLength(music));
+        
+        BeginDrawing(); 
             ClearBackground(RAYWHITE);
+
+            const float SCROLL_BAR_WIDTH = 12;
+            bool vertical_scrollbar_visible = panelContentRec.height > GetScreenHeight();
+            bool horizontal_scrollbar_visible = panelContentRec.width < GetScreenWidth();
 
             const float BAR_HEIGHT = 80.00; 
             const Rectangle BOTTOM_BAR_BOUNDS = (Rectangle) {0, GetScreenHeight() - BAR_HEIGHT, GetScreenWidth(), BAR_HEIGHT};
-
+            const Rectangle TOP_BAR_BOUNDS = { 0, 0, GetScreenWidth() - (vertical_scrollbar_visible ? SCROLL_BAR_WIDTH : 0), CONTENT_HEIGHT };
+            
             // BODY
             {
-                const float SCROLL_BAR_WIDTH = 12;
-                
-                bool scrollbar_visible = panelContentRec.height > GetScreenHeight();
-                
-                Rectangle panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() - BAR_HEIGHT };
-
+                Rectangle panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() - BAR_HEIGHT + (!horizontal_scrollbar_visible ? SCROLL_BAR_WIDTH : 0) };
                 GuiScrollPanel(panelRec, NULL, panelContentRec, &panelScroll, &panelView);
                 
                 for(int i = 0; i < songs_read; i++) {
                     // the updated bounds of the rectangle from scrolling 
-                    Rectangle adjusted_content_rectangle = content_rectangles[i];
-                    
-                    // only y and width are adjusted each frame
-                    adjusted_content_rectangle.y += panelScroll.y;
-                    adjusted_content_rectangle.width = GetScreenWidth();
-                    if(scrollbar_visible)
-                        adjusted_content_rectangle.width -= SCROLL_BAR_WIDTH;  
+                    Rectangle adjusted_content_rectangle = {content_rectangles[i].x, (content_rectangles[i].y + panelScroll.y), 
+                                                GetScreenWidth() - (vertical_scrollbar_visible ? SCROLL_BAR_WIDTH : 0), content_rectangles[i].height};
 
-                    Color color = (i == current_song_index) ? GREEN : BLACK;
+                    bool top_bar_collision = CheckCollisionRecs(TOP_BAR_BOUNDS, adjusted_content_rectangle);
+                    bool bottom_bar_collision = CheckCollisionRecs(BOTTOM_BAR_BOUNDS, adjusted_content_rectangle);
 
-                    if(!CheckCollisionRecs(adjusted_content_rectangle, BOTTOM_BAR_BOUNDS)) {
-                        if(CheckCollisionPointRec(GetMousePosition(), adjusted_content_rectangle) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                            if(i == current_song_index)
-                                flags.restart_song = true;
-                            
-                            else {
-                                if(flags.shuffle_play) {
-                                    song_history = 0;
-                                    create_song_queue(songs_read, i, shuffled_song_queue);
+                    if(!top_bar_collision && !bottom_bar_collision) {
+
+                        bool mouse_hovering = CheckCollisionPointRec(GetMousePosition(), adjusted_content_rectangle);
+                        if(mouse_hovering) {
+                            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                                if(i == current_song_index)
+                                    flags.restart_song = true;
+                                
+                                else {
+                                    if(flags.shuffle_play) {
+                                        song_history = 0;
+                                        create_song_queue(songs_read, i, shuffled_song_queue);
+                                    }
+
+                                    flags.change_song = true;
+                                    current_song_index = i;
                                 }
-
-                                flags.change_song = true;
-                                current_song_index = i;
                             }
-                       }
+                        }
 
-                        DrawText(songs[i], 15, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
-                        // DrawText(song_information[i].title, (GetScreenWidth() * 0.25) - (MeasureText(song_information[i].title, 10) * 0.50), adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
-                        // DrawText(song_information[i].artist, (GetScreenWidth() * 0.50) - (MeasureText(song_information[i].artist, 10) * 0.50), adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
-                        // DrawText(song_information[i].album, (GetScreenWidth() * 0.75) - (MeasureText(song_information[i].album, 10) * 0.50), adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
-                        // DrawText(song_information[i].duration, adjusted_content_rectangle.width - MeasureText(song_information[i].duration, 10) - 15, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, color);
+                        bool active_song = (i == current_song_index);
+                        const Color TEXT_COLOR = active_song ? GREEN : BLACK;
+                        const int FONT_SIZE = 12;
+                        
+                        // displaying song information
+                        if(song_information[i].information_ready) {
+                            char buff[LEN];
+                            sprintf(buff, "%3d", (i + 1));
+                            DrawText(buff, 5, adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00), 10, TEXT_COLOR);
+                            
+                            const float Y_LEVEL = adjusted_content_rectangle.y + (adjusted_content_rectangle.height / 2.00);
+                            DrawText(song_information[i].title, 30, Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                            DrawText(song_information[i].artist, (adjusted_content_rectangle.width * 0.30), Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                            DrawText(song_information[i].album, (adjusted_content_rectangle.width * 0.55), Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                            DrawText(song_information[i].genre, (adjusted_content_rectangle.width * 0.80), Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                        }
                     }
                 }
             }  
 
+            // TOP BAR
+            {
+                const int FONT_SIZE = 15;
+                const float Y_LEVEL = TOP_BAR_BOUNDS.y + (TOP_BAR_BOUNDS.height / 2.00);
+                const Color TEXT_COLOR = BLACK;
+
+                DrawText("#", 13, Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                DrawText("TITLE", 30, Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                DrawText("ARTIST", (TOP_BAR_BOUNDS.width * 0.30), Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                DrawText("ALBUM", (TOP_BAR_BOUNDS.width * 0.55), Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+                DrawText("GENRE", (TOP_BAR_BOUNDS.width * 0.80), Y_LEVEL, FONT_SIZE, TEXT_COLOR);
+            }
+
             // BOTTOM BAR
             {
-                DrawRectanglePro(BOTTOM_BAR_BOUNDS, (Vector2){0,0}, 0.0f, LIGHTGRAY);
+                const Color TEXT_COLOR = BLACK;
+                DrawRectanglePro(BOTTOM_BAR_BOUNDS, (Vector2){0,0}, 0.0f, RAYWHITE);
             
                 // drawing song cover
                 const float IMG_PADDING = (BAR_HEIGHT - IMG_SIZE) / 2.00;
@@ -660,9 +676,9 @@ int main()
                 
                 // song information
                 float text_starting_point = BOTTOM_BAR_BOUNDS.x + (IMG_PADDING * 2.00) + IMG_SIZE;
-                DrawText(playlists[current_playlist_index], text_starting_point, BOTTOM_BAR_BOUNDS.y + 10, 20, BLACK);
-                DrawText(song_information[current_song_index].title, text_starting_point, BOTTOM_BAR_BOUNDS.y + 35, 13, BLACK);
-                DrawText(song_information[current_song_index].artist, text_starting_point, BOTTOM_BAR_BOUNDS.y + 55, 8, BLACK);
+                DrawText(playlists[current_playlist_index], text_starting_point, BOTTOM_BAR_BOUNDS.y + 10, 20, TEXT_COLOR);
+                DrawText(song_information[current_song_index].title, text_starting_point, BOTTOM_BAR_BOUNDS.y + 35, 13, TEXT_COLOR);
+                DrawText(song_information[current_song_index].artist, text_starting_point, BOTTOM_BAR_BOUNDS.y + 55, 8, TEXT_COLOR);
 
                 // playback buttons 
                 flags.play_music = pause_button(BOTTOM_BAR_BOUNDS, flags.play_music);
@@ -683,7 +699,7 @@ int main()
         EndDrawing();
     }
 
-    for(int i = 0; i < NSONGS; i++)
+    for(int i = 0; i < songs_read; i++)
         if((song_information[i].information_ready) && IsTextureReady(song_information[i].cover))
             UnloadTexture(song_information[i].cover);
 
@@ -696,8 +712,3 @@ int main()
     CloseWindow();
     return 0;
 }
-
-// TODO
-// fix last song not showing up, only when scrollbar is there
-// save music and load it
-// clean new song loading process

@@ -1,18 +1,14 @@
 #include "headers/stream_management.h"
+#include <string.h>
 
-int get_metadata_parameter(AVDictionary* stream_metadata, const char* parameter, int maxlen, char dst[maxlen])
+int get_metadata_parameter(AVDictionary* stream_metadata, const char* parameter, int size, char dst[size])
 {
     AVDictionaryEntry* tag = av_dict_get(stream_metadata, parameter, NULL, AV_DICT_IGNORE_SUFFIX);
-    if(tag) {
-        if(strlen(tag->value) < maxlen) {
-            strcpy(dst, tag->value);
-            return 0;
-        }
 
-        else 
-            return -1;
+    if(tag && (strlen(tag->value) < size)) {
+        strcpy(dst, tag->value);
+        return 0;
     }
-
     else 
         return -1;
 }

@@ -1,11 +1,10 @@
 #include "headers/file_management.h"
 #include "headers/raylib.h"
-#include <dirent.h>
 #include <stdio.h>
+#include <dirent.h>
 #include <string.h>
-#include <sys/stat.h>
 
-int get_files_from_folder(int maxlen, int maxfiles, char dst[maxfiles][maxlen], const char* folder_path, const char file_type)
+int get_files_from_folder(int size, int maxfiles, char dst[maxfiles][size], const char* folder_path, const char file_type)
 {
     DIR* pDIR = NULL;
     struct dirent* pDirent = NULL;
@@ -18,7 +17,7 @@ int get_files_from_folder(int maxlen, int maxfiles, char dst[maxfiles][maxlen], 
     // read all non hidden files that are of a matching file_type
     int files_read = 0;
     while(((pDirent = readdir(pDIR)) != NULL) && (files_read < maxfiles)) {
-        if((pDirent->d_name[0] != '.') && (pDirent->d_type == file_type))
+        if((pDirent->d_name[0] != '.') && (pDirent->d_type == file_type) && (strlen(pDirent->d_name) < size))
             strcpy(dst[files_read++], pDirent->d_name);
     }
 
@@ -26,10 +25,9 @@ int get_files_from_folder(int maxlen, int maxfiles, char dst[maxfiles][maxlen], 
     return files_read;
 }
 
-int filter_library(int maxlen, int nsongs, char library[nsongs][maxlen], const char* extension)
+int filter_library(int size, int nsongs, char library[nsongs][size], const char* extension)
 {
     int k = 0;
-
     for(int i = 0; i < nsongs; i++) {
         if(IsFileExtension(library[i], extension)) {
             if(k != i)

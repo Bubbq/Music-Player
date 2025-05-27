@@ -43,7 +43,7 @@ typedef struct
     char artist[LEN]; 
     char relative_path[LEN]; 
     float duration;
-    float modification_time;
+    float access_time;
     bool information_ready; 
 } SongInfo;
 
@@ -259,11 +259,11 @@ Texture2D get_song_cover(const char* song_path, const char* cover_directory_path
 }
 
 // returns the time in seconds since last modification of a file
-float file_modification_time(const char* file)
+float file_access_time(const char* file)
 {
     struct stat st;
     if(stat(file, &st) == 0) 
-        return difftime(time(NULL), st.st_mtim.tv_sec);
+        return difftime(time(NULL), st.st_atim.tv_sec);
     else
         return -1;
 }
@@ -296,8 +296,10 @@ void seconds_to_last_modified(long int seconds, int maxlen, char dst[maxlen])
         snprintf(dst, maxlen, "%d hour%s ago", hours, (hours > 1 ? "s" : ""));
     else if(minutes)
         snprintf(dst, maxlen, "%d minute%s ago", minutes, (minutes > 1 ? "s" : ""));
-    else
+    else if(seconds)
         snprintf(dst, maxlen, "%ld seconds ago", seconds);
+    else
+        snprintf(dst, maxlen, "now");
 }
 
 float microseconds_to_seconds(float microseconds)
@@ -328,19 +330,26 @@ void get_information(SongInfo* information, const char* full_song_path)
     information->duration = microseconds_to_seconds(format_context->duration);
 
     // modification time
-    information->modification_time = file_modification_time(full_song_path);
+    information->access_time = file_access_time(full_song_path);
 
     information->information_ready = true;
 
     avformat_close_input(&format_context);
 }
 
+void print_information(SongInfo* information)
+{
+    printf("%s,%s,%s,%s,%f,%f,%d\n", 
+        information->title, information->artist, information->album, information->relative_path, 
+        information->duration, information->access_time, information->information_ready);
+}
+
 // comparator for qsort
-int by_modification_time(const void* a, const void* b)
+int by_access_time(const void* a, const void* b)
 {
     SongInfo* info_a = (SongInfo*)a;
     SongInfo* info_b = (SongInfo*)b;
-    return info_a->modification_time > info_b->modification_time;
+    return info_a->access_time > info_b->access_time;
 }
 
 void draw_top_bar(Rectangle container) 
@@ -397,7 +406,7 @@ int load_songs_from_playlist(SongInfo song_information[NSONGS], const char* play
     }    
 
     // sort songs s.t. the newest one is first 
-    qsort(song_information, nsongs, sizeof(SongInfo), by_modification_time);
+    qsort(song_information, nsongs, sizeof(SongInfo), by_access_time);
 
     return nsongs;
 }
@@ -503,15 +512,17 @@ int main()
         file_watch.updating = file_event(&file_watch);
         const bool done_reading = (updating && !file_watch.updating);
         
+        char* relative_path = song_information[current_song_index].relative_path;
         if(done_reading) {
+            printf("%d, %s\n", current_song_index, song_information[current_song_index].relative_path);
             for(int e = 0; e < file_watch.nevents; e++) {
                 FileEvent file_event = file_watch.events[e];
-                
                 printf("%d)", (e + 1));
                 print_inotify_event((&file_event.event), file_event.file_name);
-                
+
                 // external song deletion
                 if(file_event.event.mask == 64) {
+                    // find the index that is deleted
                     int del_index = -1;
                     for(int i = 0; i < nsongs; i++) {
                         if(strcmp(file_event.file_name, song_information[i].relative_path) == 0) {
@@ -529,27 +540,49 @@ int main()
                         for(int i = del_index; i < nsongs; i++) 
                             song_information[i] = song_information[i + 1];
 
+                        // update song count
                         nsongs--;
 
                         if(nsongs > 0) {
-                            // index adj
+                            // index adjustment
                             if(del_index < current_song_index)
                                 current_song_index--;
 
+                            // start from first song if current song is deleted
                             else if(del_index == current_song_index) {
                                 current_song_index = 0;
                                 update_flags.change_song = true;
                             }
                         }
                         else {
+                            current_song_index = 0;
+                            // stop all updates
                             update_flags = (Flags) { false };
                             no_songs_in_playlist_error = true;
                             break;
                         }
                     }
                 }
+
+                // external song addition
+                else if(file_event.event.mask == 128) {
+                    // check if the new file is an mp3
+                    if(IsFileExtension(file_event.file_name, ".mp3")) {
+                        char full_song_path[LEN * 3];
+                        snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, file_event.file_name);
+                        if((nsongs + 1) < NSONGS) {
+                            current_song_index = 0;
+                            update_flags.change_song = true;
+                            strcpy(song_information[nsongs].relative_path, file_event.file_name);
+                            get_information((song_information + nsongs), full_song_path);
+                            nsongs++;
+                            no_songs_in_playlist_error = false;
+                        }
+                    }
+                }
             }
 
+            qsort(song_information, nsongs, sizeof(SongInfo), by_access_time);
             file_watch.nevents = 0;
         }
         
@@ -788,7 +821,7 @@ int main()
                             DrawText(song_information[s].album, (content_rect.width * 0.50f), Y_LEVEL, FONT_SIZE, text_color);
 
                             char last_accessed[LEN];
-                            seconds_to_last_modified(song_information[s].modification_time, LEN, last_accessed);
+                            seconds_to_last_modified(song_information[s].access_time, LEN, last_accessed);
                             DrawText(last_accessed, (content_rect.width * 0.70f), Y_LEVEL, FONT_SIZE, text_color);
 
                             char duration[LEN];
@@ -856,3 +889,5 @@ int main()
 // song covers are blank when clearing playlist and loading new playlist
 // fix shuffle issue, some index repeat!
 // error handle no playlists
+
+// keep same index when adding songs instead of going to the first index

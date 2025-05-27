@@ -1,7 +1,10 @@
 #include "headers/raylib.h"
+#include "headers/file_watch.h"
 #include "headers/file_management.h"
 #include "headers/stream_management.h"
 
+#include <sys/inotify.h>
+#include <sys/types.h>
 #include <time.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -76,7 +79,7 @@ void create_song_queue(int nsongs, int current_song_index, int queue[nsongs])
             queue[i] = i - 1;
         else
             queue[i] = i;
-
+        
     shuffle_array(nsongs, queue + 1);
 }
 
@@ -229,7 +232,7 @@ Texture2D get_song_cover(const char* song_path, const char* cover_directory_path
 
     // getting the cover path
     char cover_path[LEN * 2];
-    if(get_cover_path((LEN * 2), cover_path, GetFileNameWithoutExt(song_path), cover_directory_path) < 0)
+    if(get_cover_path((LEN * 2), cover_path, GetFileNameWithoutExt(song_path), cover_directory_path) < 0) 
         image = LoadImage(DEFAULT_IMG_PATH); 
 
     // extract the cover image if the file doesnt already exist
@@ -332,14 +335,7 @@ void get_information(SongInfo* information, const char* full_song_path)
     avformat_close_input(&format_context);
 }
 
-// comparators for qsort
-int by_title(const void* a, const void* b)
-{
-    SongInfo* info_a = (SongInfo*)a;
-    SongInfo* info_b = (SongInfo*)b;
-    return strcmp(info_a->title, info_b->title);
-}
-
+// comparator for qsort
 int by_modification_time(const void* a, const void* b)
 {
     SongInfo* info_a = (SongInfo*)a;
@@ -392,7 +388,7 @@ int load_songs_from_playlist(SongInfo song_information[NSONGS], const char* play
     int nsongs = filter_library(LEN, potential_songs, relative_paths, ".mp3");
 
     // get information of every song
-    for(int i  = 0; i < nsongs; i++) {
+    for(int i = 0; i < nsongs; i++) {
         char buffer[LEN * 3];
         snprintf(buffer, (LEN * 3), "%s/%s", playlist_path, relative_paths[i]);
 
@@ -406,14 +402,17 @@ int load_songs_from_playlist(SongInfo song_information[NSONGS], const char* play
     return nsongs;
 }
 
+void delete_song_information(SongInfo* song_information)
+{
+    if(IsTextureReady(song_information->cover))
+        UnloadTexture(song_information->cover);
+    (*song_information) = (SongInfo){ 0 };
+}
+
 void unload_song_information(int nsongs, SongInfo song_information[nsongs])
 {
-    int i = 0;
-    for(Texture2D texture = song_information[i].cover; (i < nsongs); i++, texture = song_information[i].cover)
-        if(IsTextureReady(texture))
-            UnloadTexture(texture);
-
-    memset(song_information, 0, (sizeof(SongInfo) * nsongs));
+    for(int i = 0; i < nsongs; i++)
+        delete_song_information(song_information + i);
 }
 
 int main()
@@ -431,12 +430,13 @@ int main()
     // a list of relative playlists paths
     char playlists[NPLAYLIST][LEN];
 
-    // full path to the current playlist 
-    char playlist_path[LEN * 2];
-    
     // pointers to current playlist and song
     int current_song_index, current_playlist_index;
     current_playlist_index = current_song_index = 0;
+    
+    // full path to the current playlist 
+    char playlist_path[LEN * 2];
+    snprintf(playlist_path, (LEN * 2), "%s/%s", playlist_directory, playlists[current_playlist_index]);
 
     // the list of shuffled songs to be played
     int shuffled_song_queue[NSONGS];
@@ -472,29 +472,89 @@ int main()
 
     // loading all playlists
     int nplaylists;
-    if((nplaylists = get_files_from_folder(LEN, NPLAYLIST, playlists, playlist_directory, DT_DIR)) == 0)
-        no_playlists_error = true;
+    nplaylists = get_files_from_folder(LEN, NPLAYLIST, playlists, playlist_directory, DT_DIR);
+    no_playlists_error = (nplaylists == 0);
 
     // updating playlist path
     snprintf(playlist_path, (LEN * 2), "%s/%s", playlist_directory, playlists[current_playlist_index]);
+    
+    FileWatch file_watch;
+    const uint32_t SIGNAL  = (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO);
+    init_file_watch(&file_watch, playlist_path, SIGNAL);
 
     // loading all songs in current playlist
     int nsongs;
-    if((nsongs = load_songs_from_playlist(song_information, playlist_path)) == 0)
-        no_songs_in_playlist_error = true;
+    nsongs = load_songs_from_playlist(song_information, playlist_path);
+    no_songs_in_playlist_error = (nsongs == 0);
 
     // load the cover and music stream of the current song
-    set_current_song(playlist_path, cover_directory_path, (song_information + current_song_index), &music, settings);
-    PlayMusicStream(music);
+    if(nsongs > 0) {
+        set_current_song(playlist_path, cover_directory_path, (song_information + current_song_index), &music, settings);
+        PlayMusicStream(music);
+    }
 
     // inital position of scrollbar
     Vector2 panelScroll = { 99, 0 };
     Rectangle panelView = { 10, 10 };
 
     while(!WindowShouldClose()) {
+        // when the current playlist is modified
+        bool updating = file_watch.updating;
+        file_watch.updating = file_event(&file_watch);
+        const bool done_reading = (updating && !file_watch.updating);
+        
+        if(done_reading) {
+            for(int e = 0; e < file_watch.nevents; e++) {
+                FileEvent file_event = file_watch.events[e];
+                
+                printf("%d)", (e + 1));
+                print_inotify_event((&file_event.event), file_event.file_name);
+                
+                // external song deletion
+                if(file_event.event.mask == 64) {
+                    int del_index = -1;
+                    for(int i = 0; i < nsongs; i++) {
+                        if(strcmp(file_event.file_name, song_information[i].relative_path) == 0) {
+                            del_index = i;
+                            break;
+                        }
+                    }
+
+                    if(del_index >= 0) {
+                        // clear content of deleted song
+                        if(song_information[del_index].information_ready) 
+                            delete_song_information((song_information + del_index));
+
+                        // shift all elements accordingly
+                        for(int i = del_index; i < nsongs; i++) 
+                            song_information[i] = song_information[i + 1];
+
+                        nsongs--;
+
+                        if(nsongs > 0) {
+                            // index adj
+                            if(del_index < current_song_index)
+                                current_song_index--;
+
+                            else if(del_index == current_song_index) {
+                                current_song_index = 0;
+                                update_flags.change_song = true;
+                            }
+                        }
+                        else {
+                            update_flags = (Flags) { false };
+                            no_songs_in_playlist_error = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            file_watch.nevents = 0;
+        }
         
         // toggle shuffle mode
-        if(IsKeyPressed(KEY_S)) {
+        if(IsKeyPressed(KEY_S) && (nsongs > 1)) {
             update_flags.shuffle_play = !update_flags.shuffle_play;
 
             if(update_flags.shuffle_play) {
@@ -502,6 +562,9 @@ int main()
                 create_song_queue(nsongs, current_song_index, shuffled_song_queue);
             }
         }
+
+        else if(IsKeyPressed(KEY_P))
+            show_playlist_window = !show_playlist_window;
 
         if(change_playlist) {
             change_playlist = false;
@@ -513,25 +576,30 @@ int main()
             snprintf(playlist_path, (LEN * 2), "%s/%s", playlist_directory, playlists[current_playlist_index]);
 
             // songs of new playlist
-            if((nsongs = load_songs_from_playlist(song_information, playlist_path)) == 0)
-                no_songs_in_playlist_error = true;
+            nsongs = load_songs_from_playlist(song_information, playlist_path);
+            no_songs_in_playlist_error = (nsongs == 0);
             
-            // start from the first song
-            current_song_index = 0;
-            set_current_song(playlist_path, cover_directory_path, (song_information + current_song_index), &music, settings);
-            PlayMusicStream(music);
+            if(nsongs > 0) {
+                // start from the first song
+                current_song_index = 0;
+                set_current_song(playlist_path, cover_directory_path, (song_information + current_song_index), &music, settings);
+                PlayMusicStream(music);
+
+                if(update_flags.shuffle_play) {
+                    song_history = 0;
+                    create_song_queue(nsongs, current_song_index, shuffled_song_queue);
+                }
+
+                // reset the file watch to observe the new playlist
+                deinit_file_watch(&file_watch);
+                init_file_watch(&file_watch, playlist_path, SIGNAL);
+            }
 
             update_flags.play_music = false;
-
-            if(update_flags.shuffle_play) {
-                song_history = 0;
-                create_song_queue(nsongs, current_song_index, shuffled_song_queue);
-            }
         }
 
         // updating music stream
         if(IsMusicReady(music)) {
-           
             // reset music settings to default
             if(IsKeyPressed(KEY_R)) {
                 settings.pan = 0.50f;
@@ -623,12 +691,9 @@ int main()
             const float SCROLL_BAR_WIDTH = 13;
             const float BOTTOM_BAR_HEIGHT = 100.00; 
             
-            const Rectangle BOTTOM_BAR_BOUNDS = (Rectangle) {0, GetScreenHeight() - BOTTOM_BAR_HEIGHT, GetScreenWidth(), 100};
-
-            // the bounds of the scrollpanel on the screen
-            const Rectangle panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() - BOTTOM_BAR_HEIGHT + SCROLL_BAR_WIDTH };
-
             if(show_playlist_window) {
+                // the bounds of the scrollpanel on the screen
+                const Rectangle panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() + SCROLL_BAR_WIDTH };
                 const Rectangle panelContentRec = (Rectangle){ 0, 0, GetScreenWidth(), (nplaylists * CONTENT_HEIGHT) };
                 const bool vertical_scrollbar_visible = panelContentRec.height > (GetScreenHeight() - BOTTOM_BAR_HEIGHT);
 
@@ -637,8 +702,8 @@ int main()
                 for(int p = 0, y_level = 0; p < nplaylists; p++, y_level += CONTENT_HEIGHT) {
                     const Rectangle content_rect = { 0, (y_level + panelScroll.y), GetScreenWidth() - (vertical_scrollbar_visible ? SCROLL_BAR_WIDTH : 0), CONTENT_HEIGHT };
                     
-                    const bool over_bottom_bar = (content_rect.y + (content_rect.height * 0.75f)) < BOTTOM_BAR_BOUNDS.y;
-                    if(over_bottom_bar) {
+                    const bool in_bounds = (content_rect.y + (content_rect.height * 0.75f)) < GetScreenHeight();
+                    if(in_bounds) {
                         // selecting a playlist
                         if(CheckCollisionPointRec(GetMousePosition(), content_rect)) {
                             if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -663,7 +728,17 @@ int main()
                 }
             }
 
+            else if(no_songs_in_playlist_error) {
+               const char* TEXT = "THERE ARE NO SONGS IN THE PLAYLIST!";
+               DrawText(TEXT, (GetScreenWidth() / 2.0f) - (MeasureText(TEXT, 30) / 2.0f), (GetScreenHeight() / 2.0f), 30, BLACK); 
+            }
+
             else {
+                const Rectangle BOTTOM_BAR_BOUNDS = (Rectangle) {0, GetScreenHeight() - BOTTOM_BAR_HEIGHT, GetScreenWidth(), 100};
+
+                // the bounds of the scrollpanel on the screen
+                const Rectangle panelRec = (Rectangle){ 0, -1, GetScreenWidth(), GetScreenHeight() - BOTTOM_BAR_HEIGHT + SCROLL_BAR_WIDTH };
+                
                 const Rectangle panelContentRec = (Rectangle){ 0, CONTENT_HEIGHT, GetScreenWidth(), ((nsongs + 1) * CONTENT_HEIGHT)};
                 const bool vertical_scrollbar_visible = panelContentRec.height > (GetScreenHeight() - BOTTOM_BAR_HEIGHT);
                 const Rectangle TOP_BAR_BOUNDS = { 0, 0, GetScreenWidth() - (vertical_scrollbar_visible ? SCROLL_BAR_WIDTH : 0), CONTENT_HEIGHT };
@@ -679,10 +754,9 @@ int main()
                     const bool valid_position = (under_top_bar && over_bottom_bar);
 
                     if(valid_position) {
-                    
                         bool mouse_hovering = CheckCollisionPointRec(GetMousePosition(), content_rect);
                         if(mouse_hovering) {
-                            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (song_information[current_song_index].information_ready)) {
                                 // restart the song if you select the current one
                                 if(s == current_song_index)
                                     update_flags.restart_song = true;
@@ -722,53 +796,49 @@ int main()
                             DrawText(duration, (content_rect.width * 0.90f), Y_LEVEL, FONT_SIZE, text_color);
                         }
                     }
-                }
+                    
+                    draw_top_bar(TOP_BAR_BOUNDS);
+                }  
+
+                // BOTTOM BAR
+                {
+                    // background color
+                    DrawRectangleRec(BOTTOM_BAR_BOUNDS, RAYWHITE);
                 
-                draw_top_bar(TOP_BAR_BOUNDS);
-            }  
+                    // song cover
+                    const float IMG_PADDING = (BOTTOM_BAR_BOUNDS.height - IMG_SIZE) / 2.00;
+                    const Vector2 IMG_LOCATION = { IMG_PADDING, BOTTOM_BAR_BOUNDS.y + IMG_PADDING };
 
-            // BOTTOM BAR
-            {
-                // background color
-                DrawRectangleRec(BOTTOM_BAR_BOUNDS, RAYWHITE);
-            
-                // song cover
-                const float IMG_PADDING = (BOTTOM_BAR_BOUNDS.height - IMG_SIZE) / 2.00;
-                const Vector2 IMG_LOCATION = { IMG_PADDING, BOTTOM_BAR_BOUNDS.y + IMG_PADDING };
+                    if(IsTextureReady(song_information[current_song_index].cover))
+                        DrawTextureEx(song_information[current_song_index].cover, IMG_LOCATION, 0.0f, 1.0f, RAYWHITE);
+                                
+                    float text_starting_point = BOTTOM_BAR_BOUNDS.x + IMG_SIZE + 10;
 
-                if(IsTextureReady(song_information[current_song_index].cover))
-                    DrawTextureEx(song_information[current_song_index].cover, IMG_LOCATION, 0.0f, 1.0f, RAYWHITE);
-                            
-                float text_starting_point = BOTTOM_BAR_BOUNDS.x + IMG_SIZE + 10;
+                    // displaying current playlist
+                    char playlist[LEN * 2];
+                    snprintf(playlist, (LEN * 2), "%s %s", playlists[current_playlist_index], (update_flags.shuffle_play ? "(SHUFFLED)" : ""));
+                    DrawText(playlist, text_starting_point, (BOTTOM_BAR_BOUNDS.y + 10), 20, BLACK);
 
-                // displaying current playlist
-                char playlist[LEN * 2];
-                snprintf(playlist, (LEN * 2), "%s %s", playlists[current_playlist_index], (update_flags.shuffle_play ? "(SHUFFLED)" : ""));
-                DrawText(playlist, text_starting_point, (BOTTOM_BAR_BOUNDS.y + 10), 20, BLACK);
+                    // display song information
+                    DrawText(song_information[current_song_index].title, text_starting_point, (BOTTOM_BAR_BOUNDS.y + 35), 13, BLACK);
+                    DrawText(song_information[current_song_index].artist, text_starting_point, (BOTTOM_BAR_BOUNDS.y + 55), 10, BLACK);
 
-                // button toggling playlist window visibility
-                if(GuiButton((Rectangle){ (text_starting_point + MeasureText(playlist, 20)) + 5, (BOTTOM_BAR_BOUNDS.y + 10), 20, 20 }, "P"))
-                    show_playlist_window = !show_playlist_window;
+                    // rewind, pause, and skip buttons
+                    playback_buttons(BOTTOM_BAR_BOUNDS, &update_flags, GetMusicTimePlayed(music), GetMusicTimeLength(music));
 
-                // display song information
-                DrawText(song_information[current_song_index].title, text_starting_point, (BOTTOM_BAR_BOUNDS.y + 35), 13, BLACK);
-                DrawText(song_information[current_song_index].artist, text_starting_point, (BOTTOM_BAR_BOUNDS.y + 55), 10, BLACK);
+                    // bar to change music time position
+                    progress_bar(BOTTOM_BAR_BOUNDS, &update_flags, &progress_bar_active, &settings.percent_played, GetMusicTimePlayed(music), GetMusicTimeLength(music));
 
-                // rewind, pause, and skip buttons
-                playback_buttons(BOTTOM_BAR_BOUNDS, &update_flags, GetMusicTimePlayed(music), GetMusicTimeLength(music));
-
-                // bar to change music time position
-                progress_bar(BOTTOM_BAR_BOUNDS, &update_flags, &progress_bar_active, &settings.percent_played, GetMusicTimePlayed(music), GetMusicTimeLength(music));
-
-                // sliders to change music settings
-                music_settings(BOTTOM_BAR_BOUNDS, &settings, &music);
+                    // sliders to change music settings
+                    music_settings(BOTTOM_BAR_BOUNDS, &settings, &music);
+                }
             }
-
             DrawFPS(0, GetScreenHeight() / 2);
         EndDrawing();
     }
 
     unload_song_information(nsongs, song_information);
+    deinit_file_watch(&file_watch);
 
     if(IsMusicReady(music)) {
         if(IsMusicStreamPlaying(music))
@@ -781,6 +851,8 @@ int main()
     return 0;
 }
 
-// routine check new files? removing file while program is run does not update
+// split texttures form song information
+// change cover on next frame when selecting song directly
+// song covers are blank when clearing playlist and loading new playlist
 // fix shuffle issue, some index repeat!
-// error handle no songs and playlists
+// error handle no playlists

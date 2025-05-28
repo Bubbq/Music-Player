@@ -1,7 +1,7 @@
 #include <sys/inotify.h>
 #include <stdbool.h>
 #define LEN 256
-#define MAX_EVENTS 100
+#define MAX_EVENTS 250
 typedef struct
 {
     char file_name[LEN];
@@ -12,7 +12,7 @@ typedef struct
 {
     int fd;
     int wd;
-    bool updating;
+    bool reading_events;
     int nevents;
     FileEvent events[MAX_EVENTS];
 } FileWatch;

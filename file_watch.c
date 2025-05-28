@@ -23,7 +23,7 @@ void init_file_watch(FileWatch* file_watch, const char* filepath, const uint32_t
         exit(2);
     }
     file_watch->nevents = 0;
-    file_watch->updating = false;
+    file_watch->reading_events = false;
 }
 
 void deinit_file_watch(FileWatch* file_watch)
@@ -52,7 +52,7 @@ int file_event(FileWatch* file_watch)
         }
 
         int i = 0;
-        while ((i < len) && (file_watch->nevents < MAX_EVENTS)) {
+        while ((i < len) && ((file_watch->nevents + 1) < MAX_EVENTS)) {
             struct inotify_event* event = (struct inotify_event*) &buffer[i];
             file_watch->events[file_watch->nevents].event = (*event);
             strcpy(file_watch->events[file_watch->nevents].file_name, event->name);

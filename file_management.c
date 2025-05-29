@@ -108,3 +108,14 @@ int linux_format(int maxlen, char dst[maxlen], const char* path)
     dst[length] = '\0';
     return length;
 }
+
+char* get_relative_path(const char filepath[])
+{
+    char* final_forward_slash = strrchr(filepath, '/');
+    if(final_forward_slash)
+        return (final_forward_slash + 1);
+    else {
+        perror("get_relative_path");
+        return NULL;
+    }
+}

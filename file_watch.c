@@ -33,36 +33,38 @@ void deinit_file_watch(FileWatch* file_watch)
     close(file_watch->fd);
 }
 
-int file_event(FileWatch* file_watch)
+void file_event(FileWatch* file_watch)
 {
     int total_read = 0;
     char buffer[BUF_LEN];
 
-    // continue reading while events are availible
-    while(true) {
-        int len = read(file_watch->fd, buffer, sizeof(buffer));
-        if (len < 0) {
-            const bool no_events = ((errno == EAGAIN )|| (errno == EWOULDBLOCK));
-            if (no_events)
-                break;
-            else {
-                perror("file_event / read");
-                return 0;
-            }
+    // read events when they become availible
+    int len = read(file_watch->fd, buffer, sizeof(buffer));
+    if (len < 0) {
+        const bool no_events = ((errno == EAGAIN )|| (errno == EWOULDBLOCK));
+        if (no_events) {
+            // break;
+            return;
         }
-
-        int i = 0;
-        while ((i < len) && ((file_watch->nevents + 1) < MAX_EVENTS)) {
-            struct inotify_event* event = (struct inotify_event*) &buffer[i];
-            file_watch->events[file_watch->nevents].event = (*event);
-            strcpy(file_watch->events[file_watch->nevents].file_name, event->name);
-            file_watch->nevents++;
-            i += EVENT_SIZE + event->len;
-            total_read++;
+        else {
+            perror("file_event / read");
+            return;
         }
     }
 
-    return (total_read > 0);
+    // found an event in the filepath, start the counting sequence
+    file_watch->nframes_reading = 0;
+    file_watch->reading_events = true;
+
+    int i = 0;
+    while ((i < len) && (file_watch->nevents < MAX_EVENTS)) {
+        struct inotify_event* event = (struct inotify_event*) &buffer[i];
+        file_watch->events[file_watch->nevents].event = (*event);
+        strcpy(file_watch->events[file_watch->nevents].file_name, event->name);
+        file_watch->nevents++;
+        i += EVENT_SIZE + event->len;
+        total_read++;
+    }
 }
 
 void print_inotify_event(struct inotify_event* event, const char* file_name) 

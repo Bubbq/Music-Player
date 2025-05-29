@@ -12,3 +12,6 @@ void make_directory(const char* directory_path);
 
 // converts a filepath into a linux formatted file stored into 'dst', returns dst size
 int linux_format(int maxlen, char dst[maxlen], const char* path);
+
+// returns a pointer to the relative path of the passed filepath
+char* get_relative_path(const char filepath[]);

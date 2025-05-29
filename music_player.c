@@ -18,7 +18,7 @@
 #include "headers/raygui.h"
 
 #define LEN 256
-#define NSONGS 250
+#define NSONGS 100
 #define NPLAYLIST 100
 #define IMG_SIZE 90
 #define SCREEN_SIZE 750
@@ -103,7 +103,6 @@ void load_new_music(Music* music, const char* song_path)
             StopMusicStream(*music);
         UnloadMusicStream(*music);
     }
-
     (*music) = LoadMusicStream(song_path);
 }
 
@@ -225,35 +224,28 @@ int get_cover_path(int size, char dst[size], const char* song_title, const char*
 
 Texture2D get_song_cover(const char* song_path, const char* cover_directory_path, int image_size)
 {
-    const char* DEFAULT_IMG_PATH = "default.png";
-    Image image = { 0 };
-
     // getting the cover path
     char cover_path[LEN * 2];
-    if(get_cover_path((LEN * 2), cover_path, GetFileNameWithoutExt(song_path), cover_directory_path) < 0) 
-        image = LoadImage(DEFAULT_IMG_PATH); 
+    if(get_cover_path((LEN * 2), cover_path, GetFileNameWithoutExt(song_path), cover_directory_path) < 0)
+        return (Texture2D) { 0 };
 
     // extract the cover image if the file doesnt already exist
-    if(!FileExists(cover_path)) {
-        if(extract_cover_image(song_path, cover_path) < 0)
-            image = LoadImage(DEFAULT_IMG_PATH);
-        else
-            image = LoadImage(cover_path);
+    else if(!FileExists(cover_path) && (extract_cover_image(song_path, cover_path) < 0))
+        return (Texture2D) { 0 };
+
+    else {
+        Image image = LoadImage(cover_path);
+        if(!IsImageReady(image))
+            return (Texture2D) { 0 };
+        
+        else {
+            ImageResize(&image, image_size, image_size);
+            Texture2D ret = LoadTextureFromImage(image);
+            if(IsImageReady(image))
+                UnloadImage(image);
+            return ret;
+        }
     }
-    else
-        image = LoadImage(cover_path);
-
-    // if at any point the cover_path is invalid, load the default image
-    if(!IsImageReady(image))
-        image = LoadImage(DEFAULT_IMG_PATH);
-
-    ImageResize(&image, image_size, image_size);
-    
-    Texture2D ret = LoadTextureFromImage(image);
-    
-    if(IsImageReady(image))
-        UnloadImage(image);
-    return ret;
 }
 
 // returns the time in seconds since last access of a file
@@ -329,7 +321,7 @@ void get_information(SongInfo* information, const char* full_song_path)
     if(strlen(track))
         information->track = atoi(track);
     else
-        information->track = -1;
+        information->track = 999;
 
     // song duration
     information->duration = microseconds_to_seconds(format_context->duration);
@@ -380,15 +372,16 @@ void draw_top_bar(Rectangle container)
 
 void set_current_song(const char* playlist_path, const char* cover_directory_path, SongInfo* song_information, Music* music, MusicSettings settings)
 {
+    // get the full path of the mp3 to load in 'Music' object
     char full_song_path[LEN * 3];
     snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, song_information->relative_path);
+    if(!FileExists(full_song_path)) {
+        perror("set_current_song");
+        return;
+    }
 
-    // get new texture
     song_information->cover = get_song_cover(full_song_path, cover_directory_path, IMG_SIZE);
-
-    // loading new music stream 
     load_new_music(music, full_song_path);
-
     // music defaults to looping 
     music->looping = false;
 
@@ -423,7 +416,7 @@ int load_songs_from_playlist(SongInfo song_information[NSONGS], const char* play
         char buffer[LEN * 3];
         snprintf(buffer, (LEN * 3), "%s/%s", playlist_path, relative_paths[i]);
         strcpy(song_information[i].relative_path, relative_paths[i]);
-        get_information((song_information + i), buffer);
+        get_information(&song_information[i], buffer);
     }    
 
     return nsongs;
@@ -498,7 +491,7 @@ int main()
     bool change_playlist = false;
     bool progress_bar_active = false;
     bool no_playlists_error = false;
-    bool no_songs_in_playlist_error = false;
+    // bool no_songs_in_playlist_error = false;
     bool is_playlist_an_album = false;
     
     // flags that control the flow of music
@@ -536,10 +529,7 @@ int main()
     nsongs = load_songs_from_playlist(song_information, playlist_path);
 
     // if playlist is an album, presereve order, otherwise, sort songs s.t. the newest one is first 
-    is_playlist_an_album = is_album(nsongs, song_information);
-    qsort(song_information, nsongs, sizeof(SongInfo), (is_playlist_an_album ? by_track_number : by_title));
-
-    no_songs_in_playlist_error = (nsongs == 0);
+    qsort(song_information, nsongs, sizeof(SongInfo), (by_title));
 
     // load the cover and music stream of the current song
     if(nsongs > 0) {
@@ -551,84 +541,98 @@ int main()
     Vector2 panelScroll = { 99, 0 };
     Rectangle panelView = { 10, 10 };
 
-    while(!WindowShouldClose()) {
-        // when the current playlist is modified
-        bool updating = file_watch.reading_events;
-        file_watch.reading_events = file_event(&file_watch);
+    // default song cover texture used when not availible
+    const char* DEFAULT_IMG_PATH = "default.png";
+    Texture2D defualt_texture = { 0 };
+    Image default_image = LoadImage(DEFAULT_IMG_PATH);
+    if(IsImageReady(default_image)) {
+        ImageResize(&default_image, IMG_SIZE, IMG_SIZE);
+        defualt_texture = LoadTextureFromImage(default_image);
+    }
 
-        // start processing file events once the file watch ceases updating
-        const bool done_reading_events = (updating && !file_watch.reading_events);
+    while(!WindowShouldClose()) {
+        file_event(&file_watch);
+        if(file_watch.reading_events)
+            file_watch.nframes_reading++;
+
+        // HACK: process events after reading them for n frames
+        // higher fps in application means you may need to increase this integer! 
+        const int frame_threshold = 5;
+        const bool done_reading_events = (file_watch.reading_events) && (file_watch.nframes_reading >= frame_threshold); 
         if(done_reading_events) {
             char old_path[LEN];
             strcpy(old_path, song_information[current_song_index].relative_path);
-            bool song_added = false;
+            int nsongs_added = 0;
+            int nsongs_deleted = 0;
             
             for(int e = 0; e < file_watch.nevents; e++) {
                 const FileEvent file_event = file_watch.events[e];
                 const struct inotify_event event = file_event.event;
                 const char* filename = file_event.file_name;
+
                 // external song deletion
-                if(event.mask == 64) {
+                const bool external_deletion = (event.mask == 64) && (nsongs > 0); 
+                if(external_deletion) {
                     // get the index of the deleted song from its filename
                     int deleted_index;
-                    if((deleted_index = find_song_index(nsongs, song_information, filename)) < 0)
+                    if((deleted_index = find_song_index(nsongs, song_information, filename)) < 0) {
+                        printf("%s was not found\n", filename);
                         continue;
-
+                    }
                     // clear information
                     delete_song_information(&song_information[deleted_index]);
-
-                    // shift elements from deleted index position
-                    shift_array(nsongs, song_information, deleted_index, 1, sizeof(SongInfo));
-
-                    // update song count
-                    nsongs--;
-
-                    if(nsongs > 0) {
-                        // index adjustment
-                        if(deleted_index < current_song_index)
-                            current_song_index--;
-                        else if(deleted_index == current_song_index) 
-                            music_flags.current_song_deleted = true;
-                    }
-                    // stop any updates if there are no songs left
-                    else {
-                        music_flags = (MusicFlags) { false };
-                        no_songs_in_playlist_error = true;
-                    }
+                    nsongs_deleted++;
                 }
 
                 // external song addition
-                else if((event.mask == 128) && (IsFileExtension(filename, ".mp3")) ){
+                const bool external_addition = (event.mask == 128) && (IsFileExtension(filename, ".mp3"));
+                if(external_addition){
                     // the path of the added song 
                     char full_song_path[LEN * 3];
-                    snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, file_event.file_name);
+                    snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, filename);
 
-                    const bool space_availible = (nsongs + 1) < NSONGS;
+                    const bool space_availible = (nsongs < NSONGS);
                     if(space_availible) {
-                        song_added = true;
                         // get new songs information
-                        strcpy(song_information[nsongs].relative_path, file_event.file_name);
+                        strcpy(song_information[nsongs].relative_path, filename);
                         get_information(&song_information[nsongs], full_song_path);
+
                         // update song count
+                        nsongs_added++;
                         nsongs++;
-                        no_songs_in_playlist_error = false;
                     }
                 }
             }
 
-            // sort the updated playlist 
-            is_playlist_an_album = is_album(nsongs, song_information);
-            qsort(song_information, nsongs, sizeof(SongInfo), (is_playlist_an_album ? by_track_number : by_title));
-
-            // find the updated index of the current song after external song addition
-            if(song_added) {
-                int index = find_song_index(nsongs, song_information, old_path);
-                if(index < 0) {
-                    current_song_index = 0;
-                    music_flags.change_song = true;
+            const bool playlist_updated = (nsongs_added) || (nsongs_deleted);
+            if(playlist_updated) {
+                // start music stream from the first song 
+                current_song_index = 0;
+                music_flags.change_song = true;
+                
+                // playlist status can only change if songs are added
+                if(nsongs_added > 0) {
+                    is_playlist_an_album = is_album(nsongs, song_information);
+                    printf("%d songs added\n", nsongs_added);
                 }
-                else
-                    current_song_index = index;
+                
+                // list is now sorted s.t. any deleted elements are at the front
+                qsort(song_information, nsongs, sizeof(SongInfo), (is_playlist_an_album ? by_track_number : by_title));
+
+                if(nsongs_deleted > 0) {
+                    // partial playlist deletion
+                    if(nsongs_deleted < nsongs)
+                        // shift elements into the null locations
+                        shift_array(nsongs, song_information, 0, nsongs_deleted, sizeof(SongInfo));
+
+                    // halt any potential updates when clearing a playlist of songs
+                    else if(nsongs == nsongs_deleted) 
+                        music_flags = (MusicFlags) { false };
+
+                    // adjust the size of the list
+                    nsongs -= nsongs_deleted;
+                    printf("%d songs deleted\n", nsongs_deleted);
+                }
             }
 
             // reset song queue if in shuffle mode
@@ -638,10 +642,11 @@ int main()
             }
 
             file_watch.nevents = 0;
+            file_watch.reading_events = false;
         }
         
         // toggle shuffle mode
-        if(IsKeyPressed(KEY_S) && (nsongs > 1)) {
+        if(IsKeyPressed(KEY_S) && (nsongs > 1)){
             music_flags.shuffle_play = !music_flags.shuffle_play;
 
             if(music_flags.shuffle_play) {
@@ -664,7 +669,6 @@ int main()
 
             // songs of new playlist
             nsongs = load_songs_from_playlist(song_information, playlist_path);
-            no_songs_in_playlist_error = (nsongs == 0);
 
             is_playlist_an_album = is_album(nsongs, song_information);
             qsort(song_information, nsongs, sizeof(SongInfo), (is_playlist_an_album ? by_track_number : by_title));
@@ -688,95 +692,92 @@ int main()
             music_flags.play_music = false;
         }
 
-        // updating music stream
-        if(IsMusicReady(music)) {
-            // reset music settings to default
-            if(IsKeyPressed(KEY_R)) {
-                settings.pan = 0.50f;
-                SetMusicPan(music, settings.pan);
+        if(nsongs > 0) {    
+            // updating music stream
+            if(IsMusicReady(music)) {
+                // reset music settings to default
+                if(IsKeyPressed(KEY_R)) {
+                    settings.pan = 0.50f;
+                    SetMusicPan(music, settings.pan);
 
-                settings.pitch = 1.0f;
-                SetMusicPitch(music, settings.pitch);
+                    settings.pitch = 1.0f;
+                    SetMusicPitch(music, settings.pitch);
 
-                settings.volume = 0.50f;
-                SetMusicVolume(music, settings.volume);
-            }
+                    settings.volume = 0.50f;
+                    SetMusicVolume(music, settings.volume);
+                }
 
-            // changing position in song
-            if(music_flags.update_song_position) {
-                music_flags.update_song_position = false;
-                SeekMusicStream(music, (GetMusicTimeLength(music) * settings.percent_played));
-            }
+                // changing position in song
+                if(music_flags.update_song_position) {
+                    music_flags.update_song_position = false;
+                    SeekMusicStream(music, (GetMusicTimeLength(music) * settings.percent_played));
+                }
 
-            // restarting current music stream
-            if(music_flags.restart_song) {
-                music_flags.restart_song = false;
-                music_flags.play_music = true;
-                StopMusicStream(music);
-                PlayMusicStream(music);
-            }
+                // restarting current music stream
+                if(music_flags.restart_song) {
+                    music_flags.restart_song = false;
+                    music_flags.play_music = true;
+                    StopMusicStream(music);
+                    PlayMusicStream(music);
+                }
 
-            bool update_current_song = (music_flags.skip_song || music_flags.rewind_song || music_flags.change_song || music_flags.current_song_deleted);
-            if(update_current_song) { 
-                if(music_flags.skip_song) {
-                    music_flags.skip_song = false;
+                bool update_current_song = (music_flags.skip_song || music_flags.rewind_song || music_flags.change_song || music_flags.current_song_deleted);
+                if(update_current_song) { 
+                    if(music_flags.skip_song) {
+                        music_flags.skip_song = false;
 
-                    if(music_flags.shuffle_play) {
-                        if(song_history == (nsongs - 1)) { 
-                            // create a new queue s.t. the first song is not the last song from the previous 
-                            int first_song;
-                            while((first_song = GetRandomValue(0, (nsongs - 1))) == current_song_index)
-                                ;
-                            create_song_queue(nsongs, first_song, shuffled_song_queue);
-                            song_history = -1;
+                        if(music_flags.shuffle_play) {
+                            if(song_history == (nsongs - 1)) { 
+                                // create a new queue s.t. the first song is not the last song from the previous 
+                                int first_song;
+                                while((first_song = GetRandomValue(0, (nsongs - 1))) == current_song_index)
+                                    ;
+                                create_song_queue(nsongs, first_song, shuffled_song_queue);
+                                song_history = -1;
+                            }
+
+                            current_song_index = shuffled_song_queue[++song_history];
                         }
 
-                        current_song_index = shuffled_song_queue[++song_history];
+                        else
+                            current_song_index++;
                     }
 
-                    else
-                        current_song_index++;
-                }
+                    else if(music_flags.rewind_song) {
+                        music_flags.rewind_song = false;
 
-                else if(music_flags.rewind_song) {
-                    music_flags.rewind_song = false;
+                        // load the previous song in the queue
+                        if(music_flags.shuffle_play) {
+                            if(song_history)
+                                song_history--;
+                            
+                            current_song_index = shuffled_song_queue[song_history];
+                        }
 
-                    // load the previous song in the queue
-                    if(music_flags.shuffle_play) {
-                        if(song_history)
-                            song_history--;
-                        
-                        current_song_index = shuffled_song_queue[song_history];
+                        else
+                            current_song_index--;
                     }
+                    
+                    else if(music_flags.change_song)
+                        music_flags.change_song = false;
+                    
+                    // confine index to bounds (when rewinding first song and skipping last)
+                    current_song_index = (current_song_index + nsongs) % nsongs;
 
-                    else
-                        current_song_index--;
+                    // load and play the song for the updated index
+                    set_current_song(playlist_path, cover_directory_path, &song_information[current_song_index], &music, settings);
+                    PlayMusicStream(music);
+                    music_flags.play_music = true;
                 }
                 
-                else if(music_flags.change_song)
-                    music_flags.change_song = false;
-                
-                // start from first song if current song is deleted
-                else if(music_flags.current_song_deleted) {
-                    music_flags.current_song_deleted = false;
-                    current_song_index = 0;
-                }
-
-                music_flags.play_music = true;
-                
-                // confine index to bounds (when rewinding first song and skipping last)
-                current_song_index = (current_song_index + nsongs) % nsongs;
-                set_current_song(playlist_path, cover_directory_path, &song_information[current_song_index], &music, settings);
-                PlayMusicStream(music);
+                if(music_flags.play_music && IsMusicReady(music))
+                    UpdateMusicStream(music);
             }
-            
-            if(music_flags.play_music)
-                UpdateMusicStream(music);
+
+            if(!progress_bar_active)
+                settings.percent_played = (GetMusicTimePlayed(music) / GetMusicTimeLength(music));
         }
-
-        if(!progress_bar_active)
-            settings.percent_played = (GetMusicTimePlayed(music) / GetMusicTimeLength(music));
-
+        
         BeginDrawing(); 
             ClearBackground(RAYWHITE);
             const int FONT_SIZE = 12;
@@ -821,7 +822,7 @@ int main()
                 }
             }
 
-            else if(no_songs_in_playlist_error) {
+            else if(nsongs == 0) {
                const char* TEXT = "THERE ARE NO SONGS IN THE PLAYLIST!";
                DrawText(TEXT, (GetScreenWidth() / 2.0f) - (MeasureText(TEXT, 30) / 2.0f), (GetScreenHeight() / 2.0f), 30, BLACK); 
             }
@@ -846,9 +847,9 @@ int main()
                     // song cover
                     const float IMG_PADDING = (BOTTOM_BAR_BOUNDS.height - IMG_SIZE) / 2.00;
                     const Vector2 IMG_LOCATION = { IMG_PADDING, BOTTOM_BAR_BOUNDS.y + IMG_PADDING };
-
-                    if(IsTextureReady(song_information[current_song_index].cover))
-                        DrawTextureEx(song_information[current_song_index].cover, IMG_LOCATION, 0.0f, 1.0f, RAYWHITE);
+                    Texture2D song_cover = song_information[current_song_index].cover;
+                    const Texture2D display_texture = IsTextureReady(song_cover) ? song_cover : defualt_texture;
+                    DrawTextureEx(display_texture, IMG_LOCATION, 0.0f, 1.0f, RAYWHITE);
                                 
                     float text_starting_point = BOTTOM_BAR_BOUNDS.x + IMG_SIZE + 10;
 

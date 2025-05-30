@@ -4,7 +4,7 @@
 #include <dirent.h>
 #include <string.h>
 
-int get_files_from_folder(int size, int maxfiles, char dst[maxfiles][size], const char* folder_path, const char file_type)
+int get_files_from_folder(int nchars, int nelements, char dst[nelements][nchars], const char* folder_path, const char file_type)
 {
     DIR* pDIR = NULL;
     struct dirent* pDirent = NULL;
@@ -16,8 +16,8 @@ int get_files_from_folder(int size, int maxfiles, char dst[maxfiles][size], cons
 
     // read all non hidden files that are of a matching file_type
     int files_read = 0;
-    while(((pDirent = readdir(pDIR)) != NULL) && (files_read < maxfiles)) {
-        if((pDirent->d_name[0] != '.') && (pDirent->d_type == file_type) && (strlen(pDirent->d_name) < size))
+    while(((pDirent = readdir(pDIR)) != NULL) && (files_read < nelements)) {
+        if((pDirent->d_name[0] != '.') && (pDirent->d_type == file_type) && (strlen(pDirent->d_name) < nchars))
             strcpy(dst[files_read++], pDirent->d_name);
     }
 
@@ -25,10 +25,10 @@ int get_files_from_folder(int size, int maxfiles, char dst[maxfiles][size], cons
     return files_read;
 }
 
-int filter_library(int size, int nsongs, char library[nsongs][size], const char* extension)
+int filter_library(int nchars, int nelements, char library[nelements][nchars], const char* extension)
 {
     int k = 0;
-    for(int i = 0; i < nsongs; i++) {
+    for(int i = 0; i < nelements; i++) {
         if(IsFileExtension(library[i], extension)) {
             if(k != i)
                 strcpy(library[k], library[i]);
@@ -42,10 +42,10 @@ int filter_library(int size, int nsongs, char library[nsongs][size], const char*
 void make_directory(const char* directory_path)
 {
     if((mkdir(directory_path, 0755)) == -1)
-        printf("there was an error making the directory \"%s\"\n", directory_path);
+        perror("make_directory");
 }
 
-int linux_format(int maxlen, char dst[maxlen], const char* path)
+int linux_format(int nchars, char dst[nchars], const char* path)
 {
     // characters in linux that need escape sequences 
     const char BAD_CHARS [] = " ()&'`\\!\"$*?#{}[]|;<>~";
@@ -89,7 +89,7 @@ int linux_format(int maxlen, char dst[maxlen], const char* path)
             const char* replacement = REPLACE[replacement_index];
             int replacement_length = strlen(replacement);
 
-            if(length + replacement_length < maxlen - 1) {
+            if(length + replacement_length < nchars - 1) {
                 strcpy(dst + length, replacement);
                 length += replacement_length;
             }
@@ -98,7 +98,7 @@ int linux_format(int maxlen, char dst[maxlen], const char* path)
                 return 0;
         }
 
-        else if(length < maxlen - 1)
+        else if(length < nchars - 1)
             dst[length++] = path[i];
 
         else
@@ -107,15 +107,4 @@ int linux_format(int maxlen, char dst[maxlen], const char* path)
 
     dst[length] = '\0';
     return length;
-}
-
-char* get_relative_path(const char filepath[])
-{
-    char* final_forward_slash = strrchr(filepath, '/');
-    if(final_forward_slash)
-        return (final_forward_slash + 1);
-    else {
-        perror("get_relative_path");
-        return NULL;
-    }
 }

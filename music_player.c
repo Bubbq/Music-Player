@@ -2,6 +2,7 @@
 #include "headers/file_watch.h"
 #include "headers/file_management.h"
 #include "headers/stream_management.h"
+#include "raylib/src/raylib.h"
 
 #include <sys/inotify.h>
 #include <time.h>
@@ -111,6 +112,7 @@ void init_app()
 {
     srand(time(NULL));
     SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
+    SetTraceLogLevel(LOG_ERROR);
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(900,750, "Dotify");
     InitAudioDevice();
@@ -125,7 +127,6 @@ void change_music(Music* music, const char* songpath)
         if(IsMusicStreamPlaying(*music))
             StopMusicStream(*music);
         UnloadMusicStream(*music);
-        (*music) = (Music){ 0 };
     }
     // load the new music
     if(!FileExists(songpath)) {
@@ -439,8 +440,19 @@ int find_song_index(int nsongs, SongInfo song_information[nsongs], const char* r
     return -1;
 }
 
+int find_playlist_index(int nplaylists, int nchars, char playlists[nplaylists][nchars], const char* target)
+{
+    for(int p = 0; p < nplaylists; p++)
+        if(strcmp(playlists[p], target) == 0)
+            return p;
+    perror("find_playlist_index, playlist specified by target was not found");
+    return -1;
+}
+
 int main()
 {   
+    const int frame_read_threshold = 10;
+
     const char* HOME_DIRECTORY = getenv("HOME");
     
     // path to folder where covers are held
@@ -453,6 +465,7 @@ int main()
 
     // a list of relative playlists paths
     char playlists[NPLAYLIST][LEN];
+    memset(playlists, 0, sizeof(playlists));
 
     // pointers to current playlist and song
     int current_song_index, current_playlist_index;
@@ -467,7 +480,9 @@ int main()
     int song_history = 0; // user's position in this queue
 
     // relavent information of every song in the current playlist
-    SongInfo song_information[NSONGS] = { 0 };
+    SongInfo song_information[NSONGS];
+    memset(song_information, 0, sizeof(song_information));
+
     int nsongs;
     
     // application flags
@@ -490,8 +505,9 @@ int main()
 
     ApplicationState application_state;
 
-    FileWatch external_song_watch;
     const uint32_t SIGNALS  = (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO);
+    FileWatch external_song_watch;
+    FileWatch external_playlist_watch;
     
     // creating cover directory
     if(!DirectoryExists(cover_directory_path))
@@ -503,8 +519,10 @@ int main()
         application_state = NO_PLAYLIST;
     else {
         application_state = PLAYLIST_WINDOW;
-        qsort(playlists, nplaylists, sizeof(playlists[0]), by_playlist);
+        qsort(playlists, nplaylists, LEN, by_playlist);
     }
+    // start watching for external events regarding playlists
+    init_file_watch(&external_playlist_watch, playlist_directory, SIGNALS);
 
     init_app();
 
@@ -523,14 +541,26 @@ int main()
     }
 
     while(!WindowShouldClose()) {
+      
         if((application_state == SONG_WINDOW) || (application_state == NO_SONGS_IN_PLAYLIST)) {
-            file_event(&external_song_watch);
-            if(external_song_watch.reading_events)
-                external_song_watch.nframes_reading++;
-            // HACK: process events after reading them for n frames
-            // higher fps in application means you may need to increase this integer! 
-            const int frame_threshold = 3;
-            const bool done_reading_events = (external_song_watch.reading_events) && (external_song_watch.nframes_reading >= frame_threshold); 
+            // starting position is not explicity 0 due to the fact that when reading a large amount of events, not all are read in one frame
+            // this is highly dependent on the FPS of the application where more FPS -> higher chance of n events splitting
+            const int events_read = watch_events(NSONGS, external_song_watch.nevents, external_song_watch.events, external_song_watch.fd);
+
+            // append/init the number of events read
+            external_song_watch.nevents += events_read;
+
+            // when reading a new event
+            if((external_song_watch.reading_events == false) && (events_read > 0)) {
+                external_song_watch.nframes_reading = 0;
+                external_song_watch.reading_events = true;
+            }
+
+            // continue to read until threshold is met
+            else if(external_song_watch.reading_events)
+                external_song_watch.nframes_reading++; 
+
+            const bool done_reading_events = (external_song_watch.reading_events) && (external_song_watch.nframes_reading >= frame_read_threshold); 
             if(done_reading_events) {
                 int nsongs_added = 0;
                 int nsongs_deleted = 0;
@@ -539,32 +569,29 @@ int main()
                     const struct inotify_event event = file_event.event;
                     const char* filename = file_event.file_name;
                     
-                    const bool external_deletion = (event.mask == 64) && (nsongs > 0); 
-                    if(external_deletion) {
+                    const bool external_song_deletion = (event.mask == 64); 
+                    if(external_song_deletion) {
                         // get the index of the deleted song from its filename
-                        int deleted_index;
-                        if((deleted_index = find_song_index(nsongs, song_information, filename)) < 0) 
-                            continue;
+                        const int deleted_index = find_song_index(nsongs, song_information, filename);
                         
                         // clear information
-                        delete_song_information(&song_information[deleted_index]);
-                        nsongs_deleted++;
+                        if(deleted_index >= 0) {
+                            delete_song_information(&song_information[deleted_index]);
+                            nsongs_deleted++;
+                        }
                     }
-                    const bool external_addition = (event.mask == 128) && (IsFileExtension(filename, ".mp3"));
-                    if(external_addition){
+                    const bool external_song_addition = (event.mask == 128) && (IsFileExtension(filename, ".mp3")) && (nsongs < NSONGS);
+                    if(external_song_addition){
                         // the path of the added song 
                         char full_song_path[LEN * 3];
                         snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, filename);
 
-                        const bool space_availible = (nsongs < NSONGS);
-                        if(space_availible) {
-                            // get new song's information
-                            strcpy(song_information[nsongs].relative_path, filename);
-                            get_information(&song_information[nsongs], full_song_path);
-                            // update song count
-                            nsongs_added++;
-                            nsongs++;
-                        }
+                        // get new song's information
+                        strcpy(song_information[nsongs].relative_path, filename);
+                        get_information(&song_information[nsongs], full_song_path);
+                        // update song count
+                        nsongs_added++;
+                        nsongs++;
                     }
                 }
 
@@ -577,12 +604,11 @@ int main()
                         shift_array(nsongs, song_information, 0, nsongs_deleted, sizeof(SongInfo));
                     
                     // adjust the size of the list
+                    printf("%d songs deleted\n", nsongs_deleted);
                     nsongs -= nsongs_deleted;
                 }
 
                 if(nsongs > 0) {
-                    application_state = SONG_WINDOW;
-                    
                     // start music stream from the first song 
                     current_song_index = 0;
                     set_current_song(playlist_path, cover_directory_path, &song_information[current_song_index], &music, settings);
@@ -594,6 +620,8 @@ int main()
                         song_history = 0;
                         create_song_queue(nsongs, current_song_index, shuffled_song_queue);
                     }
+
+                    application_state = SONG_WINDOW;
                 }
                 else {
                     // halt potential updates
@@ -601,9 +629,89 @@ int main()
                     application_state = NO_SONGS_IN_PLAYLIST;
                 }
 
+                // reset reading params in FileEvent object
                 external_song_watch.nevents = 0;
                 external_song_watch.reading_events = false;
             }
+        }
+
+        if(application_state == PLAYLIST_WINDOW || (application_state == NO_PLAYLIST)) {
+            // read n events into FileWatch object
+            const int events_read = watch_events(NPLAYLIST, external_playlist_watch.nevents, external_playlist_watch.events, external_playlist_watch.fd);
+            
+            // append/init the number of events read
+            external_playlist_watch.nevents += events_read;
+
+            // when reading a new event
+            if((external_playlist_watch.reading_events == false) && (events_read > 0)) {
+                external_playlist_watch.nframes_reading = 0;
+                external_playlist_watch.reading_events = true;
+            }
+            
+            // continue to read until threshold is met
+            else if(external_playlist_watch.reading_events)
+                external_playlist_watch.nframes_reading++; 
+
+            // process external events after reading for 'frame_read_threshold' frames
+            if(external_playlist_watch.reading_events && (external_playlist_watch.nframes_reading >= frame_read_threshold)) {
+                int nplaylists_deleted = 0;
+
+                for(int e = 0; e < external_playlist_watch.nevents; e++) {
+                    const FileEvent file_event = external_playlist_watch.events[e];
+                    const struct inotify_event inotify_event = file_event.event; 
+                    // const char* filename = file_event.filename; 
+                    const char* filename = file_event.file_name; 
+                    print_inotify_event(&inotify_event, filename);
+
+                    // deletion
+                    const bool external_playlist_deletion = (inotify_event.mask == 1073741888);
+                    if(external_playlist_deletion) {
+                        const int deleted_playlist_index = find_playlist_index(nplaylists, LEN, playlists, filename);
+                        if(deleted_playlist_index >= 0) {
+                            // remove relative path of the deleted playlist 
+                            memset(playlists[deleted_playlist_index], 0, sizeof(playlists[deleted_playlist_index]));
+                            nplaylists_deleted++;
+                        }
+                    }
+                    // addtion
+                    const bool external_playlist_addtion = ((inotify_event.mask == 1073741952) || (inotify_event.mask == 1073742080)) && (nplaylists < NPLAYLIST);
+                    if(external_playlist_addtion) {
+                        // only directorys are to update the 'playlists' object
+                        char potential_directory[LEN * 2];
+                        snprintf(potential_directory, (LEN * 2), "%s/%s", playlist_directory, filename);
+                        
+                        // add the new relative path
+                        if(DirectoryExists(potential_directory) && (inotify_event.len < LEN)) 
+                            strcpy(playlists[nplaylists++], filename);
+                    }
+                }
+
+                // sort elements alphabetically
+                // this means that any deleted elements are at the front since "" is first in ASCII
+                qsort(playlists, nplaylists, LEN, by_playlist);
+
+                if(nplaylists_deleted > 0) {
+                    // shift real elements into empty space
+                    shift_array(nplaylists, playlists, 0, nplaylists_deleted, LEN);
+                    
+                    // update the count
+                    nplaylists -= nplaylists_deleted;
+                }
+
+                // clear information from previous playlist (if any)
+                current_playlist_index = -1;
+                if(nsongs > 0) {
+                    music_flags = (MusicFlags){ false };
+                    unload_song_information(nsongs, song_information);
+                }
+                
+                // adjust the application state
+                application_state = (nplaylists == 0) ? NO_PLAYLIST : PLAYLIST_WINDOW;
+                
+                // reset reading params in FileEvent object
+                external_playlist_watch.nevents = 0;
+                external_playlist_watch.reading_events = false;
+            } 
         }
 
         if(IsKeyPressed(KEY_P) && (application_state != PLAYLIST_WINDOW)) 
@@ -613,7 +721,8 @@ int main()
             switch_playlist = false;
 
             // free information and covers of the previous playlist
-            unload_song_information(nsongs, song_information);
+            if(nsongs > 0) 
+                unload_song_information(nsongs, song_information);
 
             // new playlist path
             snprintf(playlist_path, (LEN * 2), "%s/%s", playlist_directory, playlists[current_playlist_index]);
@@ -621,10 +730,14 @@ int main()
             if((nsongs = load_playlist(NSONGS, song_information, playlist_path)) > 0) {
                 application_state = SONG_WINDOW;
                 
+                // retain previous loop status
+                const bool loop = music.looping;
+                
                 // start music stream from the first song 
                 current_song_index = 0;
                 set_current_song(playlist_path, cover_directory_path, &song_information[current_song_index], &music, settings);
                 PlayMusicStream(music);
+                music.looping = loop;
                 music_flags.play_music = false;
 
                 // create song queue if in shuffle mode previously
@@ -640,7 +753,8 @@ int main()
             }
 
             // reset the file watch to observe the new playlist
-            deinit_file_watch(&external_song_watch);
+            if(external_song_watch.wd)
+                deinit_file_watch(&external_song_watch);
             init_file_watch(&external_song_watch, playlist_path, SIGNALS);
         }
 
@@ -885,14 +999,18 @@ int main()
                 DrawText(no_song_msg, (GetScreenWidth() / 2.0f) - (MeasureText(no_song_msg, 20) / 2.0f), (GetScreenHeight() / 2.0f), 25, BLACK); 
             }
             else if(application_state == NO_PLAYLIST) {
-                break;
+                printf("NO PLAYLIST\n");
             }
             DrawFPS(0, GetScreenHeight() / 2);
         EndDrawing();
     }
     // dealloc
-    unload_song_information(nsongs, song_information);
-    deinit_file_watch(&external_song_watch);
+    if(nsongs > 0)
+        unload_song_information(nsongs, song_information);
+    if(external_song_watch.wd)
+        deinit_file_watch(&external_song_watch);
+    if(external_playlist_watch.wd)
+        deinit_file_watch(&external_playlist_watch);
     if(IsMusicReady(music)) {
         if(IsMusicStreamPlaying(music))
             StopMusicStream(music);
@@ -903,6 +1021,19 @@ int main()
     return 0;
 }
 
+// externally edit playlists
+// start with only in playlist window for now
+
+
+
+
+
+
+
+
+
+
 // error handle no playlists
 // do the same (add, remove, rename) for playlists
 // stop flicker on skip button when song is over
+// keep same song/playlist when editiing them

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <sys/inotify.h>
 #include <unistd.h>
 #include <string.h>
 #include "headers/file_watch.h"
@@ -33,9 +34,43 @@ void deinit_file_watch(FileWatch* file_watch)
     close(file_watch->fd);
 }
 
+int watch_events(int maxevents, int starting_point, FileEvent events[maxevents], int fd) 
+{
+    int events_read = 0;
+
+    // buffer can read up to 'maxevents' events, the 'name' param of inotify event is not included in event size
+    char buffer[maxevents * (EVENT_SIZE + LEN)];
+
+    // read events when they become availible
+    const int chars_read = read(fd, buffer, sizeof(buffer));
+    
+    // when nothing is read, read returns -1
+    if(chars_read < 0) {
+        const bool no_events = ((errno == EAGAIN )|| (errno == EWOULDBLOCK));
+        if(no_events) 
+            return false;
+        else {
+            perror("watch_events, read");
+            return false;
+        }
+    } 
+
+    int i = 0;
+    int j = starting_point;
+    while((i < chars_read) && (j < maxevents)) {
+        struct inotify_event* new_event = (struct inotify_event*) &buffer[i];
+        memcpy(&events[j].event, new_event, EVENT_SIZE);
+        strcpy(events[j].file_name, new_event->name);
+        j++;
+        events_read++;
+        i += (EVENT_SIZE + new_event->len);
+    }
+
+    return events_read;
+}
+
 void file_event(FileWatch* file_watch)
 {
-    int total_read = 0;
     char buffer[BUF_LEN];
 
     // read events when they become availible
@@ -63,11 +98,10 @@ void file_event(FileWatch* file_watch)
         strcpy(file_watch->events[file_watch->nevents].file_name, event->name);
         file_watch->nevents++;
         i += EVENT_SIZE + event->len;
-        total_read++;
     }
 }
 
-void print_inotify_event(struct inotify_event* event, const char* file_name) 
+void print_inotify_event(const struct inotify_event* event, const char* file_name) 
 {
     printf("wd=%d mask=%u cookie=%u len=%u name=%s\n",
         event->wd, event->mask,event->cookie, event->len, file_name);

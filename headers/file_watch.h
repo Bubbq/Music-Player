@@ -21,4 +21,5 @@ typedef struct
 void init_file_watch(FileWatch* file_watch, const char* filepath, const uint32_t signal);
 void deinit_file_watch(FileWatch* file_watch);
 void file_event(FileWatch* file_watch);
-void print_inotify_event(struct inotify_event* event, const char* file_name);
+void print_inotify_event(const struct inotify_event* event, const char* file_name);
+int watch_events(int maxevents, int starting_point, FileEvent events[maxevents], int fd);

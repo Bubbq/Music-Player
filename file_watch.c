@@ -69,38 +69,6 @@ int watch_events(int maxevents, int starting_point, FileEvent events[maxevents],
     return events_read;
 }
 
-void file_event(FileWatch* file_watch)
-{
-    char buffer[BUF_LEN];
-
-    // read events when they become availible
-    int len = read(file_watch->fd, buffer, sizeof(buffer));
-    if (len < 0) {
-        const bool no_events = ((errno == EAGAIN )|| (errno == EWOULDBLOCK));
-        if (no_events) {
-            // break;
-            return;
-        }
-        else {
-            perror("file_event / read");
-            return;
-        }
-    }
-
-    // found an event in the filepath, start the counting sequence
-    file_watch->nframes_reading = 0;
-    file_watch->reading_events = true;
-
-    int i = 0;
-    while ((i < len) && (file_watch->nevents < MAX_EVENTS)) {
-        struct inotify_event* event = (struct inotify_event*) &buffer[i];
-        file_watch->events[file_watch->nevents].event = (*event);
-        strcpy(file_watch->events[file_watch->nevents].file_name, event->name);
-        file_watch->nevents++;
-        i += EVENT_SIZE + event->len;
-    }
-}
-
 void print_inotify_event(const struct inotify_event* event, const char* file_name) 
 {
     printf("wd=%d mask=%u cookie=%u len=%u name=%s\n",

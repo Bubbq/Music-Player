@@ -1,5 +1,5 @@
-#include <sys/inotify.h>
 #include <stdbool.h>
+#include <sys/inotify.h>
 
 #define LEN 256
 #define MAX_EVENTS 100

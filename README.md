@@ -1,17 +1,143 @@
-# Music-Player
+# Dotify Music Player - Setup Guide
 
-PreReq's
-- Linux OS
-- [raylib dependencies](https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux)
-- ffmpeg 
-- Have folders of mp3's in 'Music' folder in computer to simulate playlists/albums
+## Overview
 
-To Run
+This is a lightweight music player application that allows you to:
 
-"make && ./run" in terminal
+- Play MP3 files organized in playlists (folders)
+- Add/delete playlists and songs in real-time
+- Listen to playlists in shuffle mode and loop playback for your favorite songs
+- Adjust music settings such as volume, pitch, and pan settings
 
-To remove all jpg's and covers folder
+---
 
-"make clean" in terminal 
+## Prerequisites
 
-![Screenshot_20240315_175616](https://github.com/Bubbq/Music-Player/assets/122418017/c799c4ad-82da-4f27-9f0c-e3e9748d14d8)
+### Dependencies
+
+Before installing Dotify, ensure you have the following installed on your system:
+
+#### FFmpeg libraries (for audio processing and metadata extraction):
+
+```bash
+sudo apt-get install libavformat-dev libavutil-dev
+```
+
+#### Raylib (for the graphical interface):
+
+```bash
+sudo apt-get install libraylib-dev
+```
+
+Or build from source: [Raylib GitHub](https://github.com/raysan5/raylib)
+
+### Directory Structure
+
+Ensure the following directories exist for Dotify to work properly:
+
+```
+~/Music/                  # Contains your playlists (each subfolder is a playlist)
+~/.cache/song_covers/     # Where extracted album art will be stored
+```
+
+## Installation
+
+### Clone or download the source code
+
+```bash
+git clone https://github.com/yourusername/dotify.git
+cd dotify # move to the application directory
+```
+
+### Build the application
+
+```bash
+make
+```
+
+This will compile the application into an executable named `music_player`.
+
+### Clean up (optional)
+
+To remove generated files and the album art cache:
+
+```bash
+make clean
+```
+
+---
+
+## Usage
+
+### Run the application
+
+```bash
+./music_player
+```
+
+## Controls
+
+### Playback
+
+- `Space`: Play/Pause
+- `A` or `←`: Rewind / Restart song
+- `D` or `→`: Skip to next song
+- `R`: Restart current song
+
+### Playback Modes
+
+- `S`: Toggle shuffle mode
+- `L`: Toggle loop mode
+
+### Navigation
+
+- `P`: Toggle between playlist view and song view
+
+---
+
+## Managing Music
+
+### Adding Music
+
+- Simply create folders in `~/Music` (each folder is a playlist)
+- Add `.mp3` files to those folders
+- The application detects changes automatically
+
+### Album Art
+
+- Album art is automatically extracted from `.mp3` files
+- Stored in `~/.cache/song_covers`
+- If no embedded cover art is found, a default image is used
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+**Missing Dependencies**
+
+- Ensure all required libraries are installed
+- Run the following commands to check:
+
+```bash
+ldconfig -p | grep raylib
+ldconfig -p | grep avformat
+```
+
+**MP3 Files Not Showing**
+
+- Verify that the files have a `.mp3` extension
+- Check that the files have appropriate read permissions
+
+## Customization
+
+You can modify the following constants in `music_player.c`:
+
+- `LEN`: Maximum path length
+- `NSONGS`: Maximum number of songs per playlist
+- `NPLAYLIST`: Maximum number of playlists
+- `IMG_SIZE`: Display size of cover art
+
+## Visual
+![Dotify Music Player Interface](example.png)

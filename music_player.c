@@ -1,3 +1,4 @@
+#include "headers/timer.h"
 #include "headers/raylib.h"
 #include "headers/file_watch.h"
 #include "headers/file_management.h"
@@ -112,7 +113,7 @@ void init_app()
     srand(time(NULL));
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
-    InitWindow(900,750, "Dotify");
+    InitWindow(GetMonitorWidth(0),GetMonitorHeight(0), "Dotify");
     InitAudioDevice();
 }
 
@@ -153,15 +154,19 @@ void seconds_to_timestamp(int s, int nchars, char timestamp[nchars])
 }
 
 // draws three buttons (rewind, pause, skip) equidistant from one another within a container
-void playback_buttons(Rectangle container, MusicFlags* flags, int seconds_played)
+void playback_buttons(Rectangle container, MusicFlags* flags, Timer* skip_timer, Timer* rewind_timer, int seconds_played)
 {
+    // no action (skip and rewind) should occur faster than this time to pass
+    const double action_interval = 0.125;
     const int size = 20;
     const float y = container.y + ((container.height - size) / 2.0f);
     
     // rewind button
     const float rewind_threshold = 3.0f; // the amount of time that needs to be played to restart rather than rewind
     const Rectangle rewind_bounds = (Rectangle){ (GetScreenWidth() / 2.00) - (size * 2.0f), y, size, size };
-    if((GuiButton(rewind_bounds, "<")) || (IsKeyPressed(KEY_A))) {
+    if((GuiButton(rewind_bounds, "<") || IsKeyPressed(KEY_A) || IsKeyPressed(KEY_LEFT)) && is_timer_done(*rewind_timer)) {
+        start_timer(rewind_timer, action_interval);
+        
         if(seconds_played >= rewind_threshold)
             flags->restart_song = true;
         else 
@@ -176,8 +181,10 @@ void playback_buttons(Rectangle container, MusicFlags* flags, int seconds_played
 
     // skip button
     const Rectangle skip_bounds = (Rectangle){ (GetScreenWidth() / 2.0f) + size, y, size, size };
-    if((GuiButton(skip_bounds, ">") || IsKeyPressed(KEY_D)))
+    if((GuiButton(skip_bounds, ">") || IsKeyPressed(KEY_D) || IsKeyPressed(KEY_RIGHT)) && is_timer_done(*skip_timer)) {
+        start_timer(skip_timer, action_interval);
         flags->play_music = flags->skip_song = true;
+    }
 }
 
 // slider to change position in song
@@ -477,7 +484,8 @@ void toggle_playlist_view(int nsongs, int nplaylists, int current_playlist_index
 
 int main()
 {   
-    const int frame_read_rewind_threshold = 10;
+    // how many frames FileWatch events reads before processing external events in playlists and/or songs
+    const int frame_read_threshold = 10;
     const char* HOME_DIRECTORY = getenv("HOME");
     
     // path to folder where covers are held, jpgs from the mp3s are extracted and written to this folder
@@ -523,7 +531,12 @@ int main()
     // application flags
     bool switch_playlist = false;
     bool progress_bar_active = false;
+    bool show_FPS = false;
     
+    // used to confine skip and rewind actions within some interval (in seconds)
+    Timer skip_timer;
+    Timer rewind_timer;
+
     // flags that control the flow of music
     MusicFlags music_flags = { false }; 
 
@@ -573,6 +586,9 @@ int main()
     
     while(!WindowShouldClose()) {
         toggle_playlist_view(nsongs, nplaylists, current_playlist_index, &application_state);
+
+        if(IsKeyPressed(KEY_F))
+            show_FPS = !show_FPS;
 
         // switching from one playlist to another
         if(switch_playlist) {
@@ -710,7 +726,7 @@ int main()
                 external_song_watch.nframes_reading++; 
                 
             // after reading events for n frames, now process file events
-            if((external_song_watch.reading_events) && (external_song_watch.nframes_reading >= frame_read_rewind_threshold)) {
+            if((external_song_watch.reading_events) && (external_song_watch.nframes_reading >= frame_read_threshold)) {
                 int nsongs_added = 0;
                 int nsongs_deleted = 0;
                 bool current_song_deleted = false;
@@ -814,8 +830,8 @@ int main()
             else if(external_playlist_watch.reading_events)
                 external_playlist_watch.nframes_reading++; 
 
-            // process external events after reading for 'frame_read_rewind_threshold' frames
-            if(external_playlist_watch.reading_events && (external_playlist_watch.nframes_reading >= frame_read_rewind_threshold)) {
+            // process external events after reading for 'frame_read_threshold' frames
+            if(external_playlist_watch.reading_events && (external_playlist_watch.nframes_reading >= frame_read_threshold)) {
                 int nplaylists_deleted = 0;
                 int nplaylists_added = 0;
                 bool current_playlist_deleted = false;
@@ -886,7 +902,7 @@ int main()
                 external_playlist_watch.reading_events = false;
             } 
         }
-       
+
         BeginDrawing(); 
             ClearBackground(RAYWHITE);
             const float CONTENT_HEIGHT = 30;
@@ -993,10 +1009,11 @@ int main()
                     if(music.looping)
                         DrawText("(LOOPED)", (x + MeasureText(song_information[current_song_index].title, 13) + 5), (BOTTOM_BAR_BOUNDS.y + 35), 13, BLACK);
                     
-                    DrawText(song_information[current_song_index].artist, x, (BOTTOM_BAR_BOUNDS.y + 55), 10, BLACK);
+                    DrawText(song_information[current_song_index].artist, x, (BOTTOM_BAR_BOUNDS.y + 55), 12, BLACK);
                     
                     // rewind, pause, and skip buttons
-                    playback_buttons(BOTTOM_BAR_BOUNDS, &music_flags, GetMusicTimePlayed(music));
+                    // playback_buttons(BOTTOM_BAR_BOUNDS, &music_flags, GetMusicTimePlayed(music));
+                    playback_buttons(BOTTOM_BAR_BOUNDS, &music_flags, &skip_timer, &rewind_timer, GetMusicTimePlayed(music));
                     
                     // bar to change music time position
                     progress_bar(BOTTOM_BAR_BOUNDS, &music_flags, &progress_bar_active, &settings.percent_played, GetMusicTimePlayed(music), GetMusicTimeLength(music));
@@ -1064,7 +1081,8 @@ int main()
                 snprintf(no_playlist_msg, (LEN * 2), "\"%s\" has no playlists, create folders of mp3s to act as playlists here", playlist_directory);
                 DrawText(no_playlist_msg, (GetScreenWidth() / 2.0f) - (MeasureText(no_playlist_msg, 20) / 2.0f), (GetScreenHeight() / 2.0f), 20, BLACK);
             }
-            DrawFPS(0, GetScreenHeight() / 2);
+            if(show_FPS)
+                DrawFPS(0, 0);
         EndDrawing();
     }
     // dealloc

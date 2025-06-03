@@ -1,7 +1,10 @@
+#include "headers/file_watch.h"
+
 #include <time.h>
 #include <stdio.h>
 #include <sys/inotify.h>
-#include "headers/file_watch.h"
+
+/*This program was created to better show the FileWatch object in a much simplier envoirnment*/
 
 int main()
 {
@@ -39,12 +42,11 @@ int main()
         
         // when you stop updating, print everything
         if(file_watch.reading_events && file_watch.nframes_reading >= threshold) {
-            for(int i = 0; i < file_watch.nevents; i++) {
-                printf("%d) ", (i + 1));
+            for(int i = 0; i < file_watch.nevents; i++) 
                 print_inotify_event(&file_watch.events[i].event, file_watch.events[i].file_name);
-            }
-            printf("\n");
             
+            printf("\n");
+
             // reset the reading params
             file_watch.nevents = 0;
             file_watch.reading_events = false;

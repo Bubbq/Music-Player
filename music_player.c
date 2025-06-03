@@ -3,7 +3,6 @@
 #include "headers/file_management.h"
 #include "headers/stream_management.h"
 
-#include <sys/inotify.h>
 #include <time.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -11,6 +10,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#include <sys/inotify.h>
 #include <libavutil/dict.h>
 #include <libavformat/avformat.h>
 
@@ -48,7 +48,7 @@ typedef struct
     char album[LEN]; 
     char artist[LEN]; 
     char relative_path[LEN]; 
-    int track;
+    float track;
     float duration;
     float access_time;
     bool information_ready; 
@@ -95,8 +95,8 @@ void swap(void* a, void* b, size_t nbytes)
 // a song queue for shuffle play
 void create_song_queue(int nsongs, int current_song_index, int queue[nsongs])
 {
-    if(current_song_index > (nsongs - 1)) {
-        perror("create_song_queue, 'current_song_index' too large");
+    if((current_song_index > (nsongs - 1)) || (current_song_index < 0)) {
+        printf("create_song_queue, invalid 'current_song_index' size");
         return;
     }
     for(int i = 0; i < nsongs; i++)
@@ -106,20 +106,18 @@ void create_song_queue(int nsongs, int current_song_index, int queue[nsongs])
     shuffle_array((nsongs - 1), (queue + 1));
 }
 
-// initalizes the application
 void init_app()
 {
+    SetTargetFPS(60);
     srand(time(NULL));
-    SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
-    SetTraceLogLevel(LOG_ERROR);
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
     InitWindow(900,750, "Dotify");
     InitAudioDevice();
-    SetTargetFPS(60);
 }
 
 // loads an mp3 file specified in path
-void change_music(Music* music, const char* songpath)
+void change_music_stream(Music* music, const char* songpath)
 {
     // clear music stream
     if(IsMusicReady(*music)) {
@@ -129,11 +127,11 @@ void change_music(Music* music, const char* songpath)
     }
     // load the new music
     if(!FileExists(songpath)) {
-        perror("change_music, 'path' does not exist in device");
+        printf("change_music_stream, %s does not exist in device\n", songpath);
         return;
     }
     else if(!IsFileExtension(songpath, ".mp3")) {
-        perror("change_music, 'path' is not a valid audio file");
+        printf("change_music_stream, %s is not a valid audio file\n", songpath);
         return;
     }
     else
@@ -157,31 +155,33 @@ void seconds_to_timestamp(int s, int nchars, char timestamp[nchars])
 // draws three buttons (rewind, pause, skip) equidistant from one another within a container
 void playback_buttons(Rectangle container, MusicFlags* flags, int seconds_played)
 {
-    const int BUTTON_SIZE = 20;
-    const float Y_LEVEL = container.y + ((container.height - BUTTON_SIZE) / 2.0f);
+    const int size = 20;
+    const float y = container.y + ((container.height - size) / 2.0f);
     
     // rewind button
-    const float THRESHOLD = 3.0f; // the amount of time that needs to be played to restart rather than rewind
-    const Rectangle REWIND = (Rectangle){ (GetScreenWidth() / 2.00) - (BUTTON_SIZE * 2.0f), Y_LEVEL, BUTTON_SIZE, BUTTON_SIZE };
-    if((GuiButton(REWIND, "<")) || (IsKeyPressed(KEY_A))) {
-        if(seconds_played >= THRESHOLD)
+    const float rewind_threshold = 3.0f; // the amount of time that needs to be played to restart rather than rewind
+    const Rectangle rewind_bounds = (Rectangle){ (GetScreenWidth() / 2.00) - (size * 2.0f), y, size, size };
+    if((GuiButton(rewind_bounds, "<")) || (IsKeyPressed(KEY_A))) {
+        if(seconds_played >= rewind_threshold)
             flags->restart_song = true;
         else 
             flags->play_music = flags->rewind_song = true;
     }
+
     // pause button
-    const char* PAUSE_TEXT = flags->play_music ? "||" : "|>";
-    const Rectangle PAUSE = (Rectangle){ (GetScreenWidth() / 2.0f) - (BUTTON_SIZE / 2.0f), Y_LEVEL, BUTTON_SIZE, BUTTON_SIZE };
-    if((GuiButton(PAUSE, PAUSE_TEXT)) || (IsKeyPressed(KEY_SPACE)))
+    const char* pause_text = flags->play_music ? "||" : "|>";
+    const Rectangle pause_bounds = (Rectangle){ (GetScreenWidth() / 2.0f) - (size / 2.0f), y, size, size };
+    if((GuiButton(pause_bounds, pause_text)) || (IsKeyPressed(KEY_SPACE))) 
         flags->play_music = !flags->play_music;
+
     // skip button
-    const Rectangle SKIP = (Rectangle){ (GetScreenWidth() / 2.0f) + BUTTON_SIZE, Y_LEVEL, BUTTON_SIZE, BUTTON_SIZE };
-    if((GuiButton(SKIP, ">") || IsKeyPressed(KEY_D)))
+    const Rectangle skip_bounds = (Rectangle){ (GetScreenWidth() / 2.0f) + size, y, size, size };
+    if((GuiButton(skip_bounds, ">") || IsKeyPressed(KEY_D)))
         flags->play_music = flags->skip_song = true;
 }
 
 // slider to change position in song
-void progress_bar(Rectangle container, MusicFlags* flags, bool* progress_bar_active, float* percentage_played, int time_played, int song_length)
+void progress_bar(Rectangle container, MusicFlags* flags, bool* progress_bar_active, float* percentage_played, float time_played, float song_length)
 {
     // update the time played when engaging with the progress bar
     if((*progress_bar_active))
@@ -189,17 +189,20 @@ void progress_bar(Rectangle container, MusicFlags* flags, bool* progress_bar_act
 
     // converting current and total song time into strings in 00:00 format
     char time_played_text[LEN];
-    char song_length_text[LEN];
     seconds_to_timestamp(time_played, LEN, time_played_text);
+    char song_length_text[LEN];
     seconds_to_timestamp(song_length, LEN, song_length_text);
 
-    const float WIDTH = GetScreenWidth() * 0.40f;
-    const Rectangle BOUNDS = { (GetScreenWidth() / 2.0f) - (WIDTH / 2.0f), container.y + (container.height * 0.75f), WIDTH, 10 };
-    if(GuiSliderBar(BOUNDS, time_played_text, song_length_text, percentage_played, 0.0f, 1.0f))
+    const float slider_width = GetScreenWidth() * 0.40f;
+    const Rectangle progress_bar_bounds = { (GetScreenWidth() / 2.0f) - (slider_width / 2.0f), container.y + (container.height * 0.75f), slider_width, 10 };
+    if(GuiSliderBar(progress_bar_bounds, time_played_text, song_length_text, percentage_played, 0.0f, 1.0f))
         (*progress_bar_active) = true;
+    else
+        *percentage_played = (time_played / song_length);
     
     if((IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) && ((*progress_bar_active))) {
         (*progress_bar_active) = false;
+
         if((*percentage_played) == 0.0f)
             flags->restart_song = true;
         else if(*percentage_played == 1.0f)
@@ -235,12 +238,14 @@ int get_cover_path(int nchars, char dst[nchars], const char* song_title, const c
 {
     const int min_len = strlen(cover_directory_path) + strlen(song_title) + strlen(".jpg");
     if(nchars < min_len) {
-        perror("get_cover_path, 'dst' size is not sufficent\n");
-        dst[0] = '\0';
+        printf("get_cover_path, nchars of dst (%d) is smaller than the min length (%d)\n", nchars, min_len);
+        memset(dst, 0, nchars);
         return -1;
     } 
-    else 
-        return snprintf(dst, nchars, "%s/%s.jpg", cover_directory_path, song_title);
+    else {
+        snprintf(dst, nchars, "%s/%s.jpg", cover_directory_path, song_title);
+        return 0;
+    } 
 }
 
 Texture2D get_song_cover(const char* song_path, const char* cover_directory_path, int image_size)
@@ -265,6 +270,20 @@ Texture2D get_song_cover(const char* song_path, const char* cover_directory_path
     }
 }
 
+Texture2D get_default_song_cover()
+{
+    // default song cover texture used when not availible
+    const char* DEFAULT_IMG_PATH = "default.png";
+    Texture2D defualt_texture = { 0 };
+    Image default_image = LoadImage(DEFAULT_IMG_PATH);
+    
+    if(IsImageReady(default_image)) {
+        ImageResize(&default_image, IMG_SIZE, IMG_SIZE);
+        defualt_texture = LoadTextureFromImage(default_image);
+    }
+    return defualt_texture;
+}
+
 // returns the time in seconds since last access of a file
 float file_access_time(const char* file)
 {
@@ -274,16 +293,6 @@ float file_access_time(const char* file)
         return difftime(right_now, st.st_atim.tv_sec);
     else
         return -1;
-}
-
-// returns a word in singular or plural based on how many there are 
-char* handle_plural(const char* word, int count)
-{
-    static char result[LEN];
-    memset(result, 0, LEN);
-    snprintf(result, LEN, "%s%s", word, (count > 1 ? "s" : ""));
-
-    return result;
 }
 
 // convert time in seconds since file has been altered to string form
@@ -298,19 +307,19 @@ void seconds_to_last_accessed(long int s, int nchars, char dst[nchars])
     int seconds = s % 60;
 
     if(years)
-        snprintf(dst, nchars, "%d %s ago", years, handle_plural("year", years));
+        snprintf(dst, nchars, "%d %s ago", years, "year(s)");
     else if(months)
-        snprintf(dst, nchars, "%d %s ago", months, handle_plural("month", months));
+        snprintf(dst, nchars, "%d %s ago", months, "month(s)");
     else if(weeks)
-        snprintf(dst, nchars, "%d %s ago", weeks, handle_plural("week", weeks));
+        snprintf(dst, nchars, "%d %s ago", weeks, "week(s)");
     else if(days)
-        snprintf(dst, nchars, "%d %s ago", days, handle_plural("day", days));
+        snprintf(dst, nchars, "%d %s ago", days, "day(s)");
     else if(hours)
-        snprintf(dst, nchars, "%d %s ago", hours, handle_plural("hour", hours));
+        snprintf(dst, nchars, "%d %s ago", hours, "hour(s)");
     else if(minutes)
-        snprintf(dst, nchars, "%d %s ago", minutes, handle_plural("minute", minutes));
+        snprintf(dst, nchars, "%d %s ago", minutes, "minute(s)");
     else if(seconds)
-        snprintf(dst, nchars, "%d %s ago", seconds, handle_plural("second", seconds));
+        snprintf(dst, nchars, "%d %s ago", seconds, "second(s)");
     else
         snprintf(dst, nchars, "now");
 }
@@ -332,18 +341,19 @@ void get_information(SongInfo* information, const char* full_song_path)
 
     const char* DEFAULT = "...";
 
+    strcpy(information->relative_path, GetFileName(full_song_path));
+
     // basic song information
-    if(get_metadata_parameter(metadata, "artist", LEN, information->artist) < 0) 
-        strcpy(information->artist, DEFAULT);
-    if(get_metadata_parameter(metadata, "title", LEN, information->title) < 0)
-        strcpy(information->title, information->relative_path);
-    if(get_metadata_parameter(metadata, "album", LEN, information->album) < 0) 
-        strcpy(information->album, DEFAULT);
+    if(get_metadata_parameter(metadata, "artist", LEN, information->artist) < 0) strcpy(information->artist, DEFAULT);
+    if(get_metadata_parameter(metadata, "title", LEN, information->title) < 0) strcpy(information->title, information->relative_path);
+    if(get_metadata_parameter(metadata, "album", LEN, information->album) < 0) strcpy(information->album, DEFAULT);
+    
     char track[LEN];
     if(get_metadata_parameter(metadata, "track", LEN, track) <  0) 
         information->track = 999;
     else
-        information->track = atoi(track);
+        information->track = atof(track);
+
     information->duration = microseconds_to_seconds(format_context->duration);
     information->access_time = file_access_time(full_song_path);
     information->information_ready = true;
@@ -364,54 +374,65 @@ int by_title(const void* a, const void* b)
     return strcmp(info_a->title, info_b->title);
 }
 
+int by_track(const void* a, const void* b)
+{
+    SongInfo* info_a = (SongInfo*)a;
+    SongInfo* info_b = (SongInfo*)b;
+    return info_a->track > info_b->track;
+}
+
 void set_current_song(const char* playlist_path, const char* cover_directory_path, SongInfo* song_information, Music* music, MusicSettings settings)
 {
     char full_song_path[LEN * 3];
     snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, song_information->relative_path);
-    
-    const bool loop = music->looping;
+    if(FileExists(full_song_path)) {
+        // maintain previous loop state
+        const bool loop = music->looping;
 
-    song_information->cover = get_song_cover(full_song_path, cover_directory_path, IMG_SIZE);
-    change_music(music, full_song_path);
+        // get new cover
+        song_information->cover = get_song_cover(full_song_path, cover_directory_path, IMG_SIZE);
+        
+        // load new music stream
+        change_music_stream(music, full_song_path);
 
-    music->looping = loop;
+        music->looping = loop;
 
-    // apply the current settings
-    SetMusicPan((*music), settings.pan);
-    SetMusicPitch((*music), settings.pitch);
-    SetMusicVolume((*music), settings.volume);
+        // apply the current settings
+        SetMusicPan((*music), settings.pan);
+        SetMusicPitch((*music), settings.pitch);
+        SetMusicVolume((*music), settings.volume);
+    }
 }
 
-// a playlist is an album whenever there are no differences 
+// a playlist is an album whenever there are no differences in albums
 bool is_album(int nsongs, SongInfo song_information[nsongs])
 {
-    char* album = song_information->album;
+    char* album = song_information[0].album;
     for(int i = 0; i < nsongs; i++)
-        if(strcmp(album, song_information[i].album) != 0)
+        if(strcmp(album, song_information[i].album) != 0 && (strlen(song_information[i].album) > 0))
             return false;
-
     return true;
 }
 
-int load_playlist(int max_nsongs, SongInfo song_information[max_nsongs], const char* playlist_path)
+int load_playlist_information(int max_nsongs, SongInfo song_information[max_nsongs], const char* playlist_path)
 {
-    // all files in the playlist path
-    char relative_paths[NSONGS][LEN];
+    // store all files in the playlist path
+    char relative_paths[NSONGS][LEN] = { 0 };
     int potential_songs = get_files_from_folder(LEN, NSONGS, relative_paths, playlist_path, DT_REG);
 
-    // filter out any non mp3s
+    // filter any non mp3s
     int nsongs = filter_library(LEN, potential_songs, relative_paths, ".mp3");
 
     // get information of every song
+    char buffer[LEN * 3];
     for(int i = 0; i < nsongs; i++) {
-        char buffer[LEN * 3];
         snprintf(buffer, (LEN * 3), "%s/%s", playlist_path, relative_paths[i]);
-        strcpy(song_information[i].relative_path, relative_paths[i]);
         get_information(&song_information[i], buffer);
     }    
 
-    // sort playlist songs in alphabetical order
-    qsort(song_information, nsongs, sizeof(SongInfo), by_title);
+    // sort songs in alphabetical order
+    const bool album = is_album(nsongs, song_information);
+    qsort(song_information, nsongs, sizeof(SongInfo), (album ? by_track : by_title));
 
     return nsongs;
 }
@@ -423,19 +444,13 @@ void delete_song_information(SongInfo* song_information)
     memset(song_information, 0, sizeof((*song_information)));
 }
 
-void unload_song_information(int nsongs, SongInfo song_information[nsongs])
-{
-    for(int i = 0; i < nsongs; i++)
-        delete_song_information(&song_information[i]);
-}
-
 // returns the index of the song with a matching relative path
 int find_song_index(int nsongs, SongInfo song_information[nsongs], const char* relative_path)
 {
     for(int s = 0; s < nsongs; s++) 
         if(strcmp(song_information[s].relative_path, relative_path) == 0)
             return s;
-    perror("find_index, song was not found");
+    printf("find_index, %s was not found\n", relative_path);
     return -1;
 }
 
@@ -444,27 +459,45 @@ int find_playlist_index(int nplaylists, int nchars, char playlists[nplaylists][n
     for(int p = 0; p < nplaylists; p++)
         if(strcmp(playlists[p], target) == 0)
             return p;
-    perror("find_playlist_index, playlist specified by target was not found");
+    printf("find_playlist_index, %s was not found\n", target);
     return -1;
+}
+
+void toggle_playlist_view(int nsongs, int nplaylists, int current_playlist_index, ApplicationState* state)
+{
+    if(IsKeyPressed(KEY_P)) {
+        if((*state) == PLAYLIST_WINDOW) {
+            if(current_playlist_index >= 0) 
+                (*state) = (nsongs > 0) ? SONG_WINDOW : NO_SONGS_IN_PLAYLIST;
+        }
+        else 
+            (*state) = (nplaylists > 0) ? PLAYLIST_WINDOW : NO_PLAYLIST;
+    }
 }
 
 int main()
 {   
-    const int frame_read_threshold = 10;
-
+    const int frame_read_rewind_threshold = 10;
     const char* HOME_DIRECTORY = getenv("HOME");
     
-    // path to folder where covers are held
+    // path to folder where covers are held, jpgs from the mp3s are extracted and written to this folder
     char cover_directory_path[LEN]; 
     snprintf(cover_directory_path, LEN, "%s/.cache/song_covers", HOME_DIRECTORY);
-
+    
+    // creating the directory
+    if(!DirectoryExists(cover_directory_path))
+        make_directory(cover_directory_path);
+    
     // path to folder where playlists (directorys holding mp3s) are held
     char playlist_directory[LEN]; 
     snprintf(playlist_directory, LEN, "%s/Music", HOME_DIRECTORY);
 
+    // creating the directory
+    if(!DirectoryExists(playlist_directory))
+        make_directory(playlist_directory);
+
     // a list of relative playlists paths
-    char playlists[NPLAYLIST][LEN];
-    memset(playlists, 0, sizeof(playlists));
+    char playlists[NPLAYLIST][LEN] = { 0 };
 
     // pointers to current playlist and song
     int current_song_index, current_playlist_index;
@@ -476,18 +509,20 @@ int main()
 
     // the list of shuffled songs to be played
     int shuffled_song_queue[NSONGS];
-    int song_history = 0; // user's position in this queue
+
+    // current position in this queue
+    int song_history = 0; 
 
     // relavent information of every song in the current playlist
-    SongInfo song_information[NSONGS];
-    memset(song_information, 0, sizeof(song_information));
+    SongInfo song_information[NSONGS] = { 0 };
 
+    // the current number of songs and playlists in the application
     int nsongs;
+    int nplaylists;
     
     // application flags
     bool switch_playlist = false;
     bool progress_bar_active = false;
-    bool is_playlist_an_album = false;
     
     // flags that control the flow of music
     MusicFlags music_flags = { false }; 
@@ -503,54 +538,55 @@ int main()
 
     ApplicationState application_state;
 
+    // the signals that trigger external events: any addition or deletion to a file or folder
     const uint32_t SIGNALS  = (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO);
+
+    // objects that detect external events to the user's playlist and songs in the current playlist
+    // an 'external event' can be described as manipulating files and folders in the file explorer while the application is running
+    // a simplified example of this in action is seen in 'file_watch_example.c'
     FileWatch external_song_watch;
     FileWatch external_playlist_watch;
     
-    // creating cover directory
-    if(!DirectoryExists(cover_directory_path))
-        make_directory(cover_directory_path);
+    // write the relative path of all folders in the playlist directory to 'playlists'
+    if((nplaylists = get_files_from_folder(LEN, NPLAYLIST, playlists, playlist_directory, DT_DIR)) > 0) {
+        application_state = PLAYLIST_WINDOW;
+        // sort playlists alphabetically
+        qsort(playlists, nplaylists, LEN, by_playlist);
+    }
+    else
+        application_state = NO_PLAYLIST;
 
-    // getting the relative path of all availible playlists
-    int nplaylists = get_files_from_folder(LEN, NPLAYLIST, playlists, playlist_directory, DT_DIR);
-    qsort(playlists, nplaylists, LEN, by_playlist);
-
-    // setting inital application stae
-    application_state = (nplaylists > 0) ? PLAYLIST_WINDOW : NO_PLAYLIST;
     // start watching for external events regarding playlists
     init_file_watch(&external_playlist_watch, playlist_directory, SIGNALS);
 
+    // initalizing the application
     init_app();
 
     // inital position of scrollbar
     Vector2 panelScroll = { 99, 0 };
+
+    // no idea what this is tbh, raylib example isnt very specfic
     Rectangle panelView = { 10, 10 };
 
-    // default song cover texture used when not availible
-    const char* DEFAULT_IMG_PATH = "default.png";
-
-    Texture2D defualt_texture = { 0 };
-    Image default_image = LoadImage(DEFAULT_IMG_PATH);
-    if(IsImageReady(default_image)) {
-        ImageResize(&default_image, IMG_SIZE, IMG_SIZE);
-        defualt_texture = LoadTextureFromImage(default_image);
-    }
-
+    // default song cover used when mp3s metadata does not have an image embedded
+    const Texture2D defualt_texture = get_default_song_cover();
+    
     while(!WindowShouldClose()) {
-        if(IsKeyPressed(KEY_P) && (application_state != PLAYLIST_WINDOW)) 
-            application_state = PLAYLIST_WINDOW;
+        toggle_playlist_view(nsongs, nplaylists, current_playlist_index, &application_state);
 
+        // switching from one playlist to another
         if(switch_playlist) {
             switch_playlist = false;
 
-            // free information and covers of the previous playlist
-            if(nsongs > 0) 
-                unload_song_information(nsongs, song_information);
+            // free information of the previous playlist
+            for(int i = 0; i < nsongs; i++)
+                delete_song_information(&song_information[i]);
 
-            // new playlist path
+            // modify the playlist path to the new playlist
             snprintf(playlist_path, (LEN * 2), "%s/%s", playlist_directory, playlists[current_playlist_index]);
 
-            if((nsongs = load_playlist(NSONGS, song_information, playlist_path)) > 0) {
+            // load information of the new playlist
+            if((nsongs = load_playlist_information(NSONGS, song_information, playlist_path)) > 0) {
                 application_state = SONG_WINDOW;
                 
                 // retain previous loop status
@@ -560,10 +596,12 @@ int main()
                 current_song_index = 0;
                 set_current_song(playlist_path, cover_directory_path, &song_information[current_song_index], &music, settings);
                 PlayMusicStream(music);
-                music.looping = loop;
+                
+                // start the song paused
                 music_flags.play_music = false;
+                music.looping = loop;
 
-                // create song queue if in shuffle mode previously
+                // create song queue if last playlist was in shuffle mode
                 if(music_flags.shuffle_play) {
                     song_history = 0;
                     create_song_queue(nsongs, current_song_index, shuffled_song_queue);
@@ -571,13 +609,13 @@ int main()
             }
             else {
                 application_state = NO_SONGS_IN_PLAYLIST;
-                // halt any potential updates
-                music_flags = (MusicFlags){ false };
+                music_flags = (MusicFlags){ false }; // halt any potential updates
             }
 
             // reset the file watch to observe the new playlist
             if(external_song_watch.wd)
                 deinit_file_watch(&external_song_watch);
+
             init_file_watch(&external_song_watch, playlist_path, SIGNALS);
         }
 
@@ -585,7 +623,7 @@ int main()
         if(IsMusicReady(music)) {
             if(music_flags.play_music) 
                 UpdateMusicStream(music);
-
+            
             // changing position in song
             if(music_flags.update_song_position) {
                 music_flags.update_song_position = false;
@@ -599,8 +637,8 @@ int main()
                 PlayMusicStream(music);
             }
 
-            bool update_current_song = (music_flags.skip_song || music_flags.rewind_song || music_flags.change_song);
-            if(update_current_song) { 
+            // handling any instance of song change
+            if(music_flags.skip_song || music_flags.rewind_song || music_flags.change_song) { 
                 if(music_flags.skip_song) {
                     music_flags.skip_song = false;
 
@@ -626,7 +664,6 @@ int main()
                     if(music_flags.shuffle_play) {
                         if(song_history)
                             song_history--;
-                        
                         current_song_index = shuffled_song_queue[song_history];
                     }
                     else
@@ -636,23 +673,21 @@ int main()
                 else if(music_flags.change_song)
                     music_flags.change_song = false;
                 
-                // confine index to bounds (when rewinding first song and skipping last)
+                // confine index to array bounds (ie. rewinding first song and skipping last)
                 current_song_index = (current_song_index + nsongs) % nsongs;
+
+                // load the content of the new song
                 set_current_song(playlist_path, cover_directory_path, &song_information[current_song_index], &music, settings);
                 PlayMusicStream(music);
             }
 
-            // handling when music stream is exhausted
-            const bool song_over = (!IsMusicStreamPlaying(music) && music_flags.play_music);
-            if(song_over) {
+            // when music stream is exhausted
+            if(!IsMusicStreamPlaying(music) && music_flags.play_music) {
                 if(music.looping)
                     music_flags.restart_song = true;
                 else
                     music_flags.skip_song = true;
             }
-
-            if(!progress_bar_active)
-                settings.percent_played = (GetMusicTimePlayed(music) / GetMusicTimeLength(music));
         }
 
         // handling external song events (deleting, adding, and/or renaming songs in your file explorer while the application is running)
@@ -670,12 +705,12 @@ int main()
                 external_song_watch.reading_events = true;
             }
 
-            // continue to read until threshold is met
+            // continue to read until rewind_threshold is met
             else if(external_song_watch.reading_events)
                 external_song_watch.nframes_reading++; 
-
-            const bool done_reading_events = (external_song_watch.reading_events) && (external_song_watch.nframes_reading >= frame_read_threshold); 
-            if(done_reading_events) {
+                
+            // after reading events for n frames, now process file events
+            if((external_song_watch.reading_events) && (external_song_watch.nframes_reading >= frame_read_rewind_threshold)) {
                 int nsongs_added = 0;
                 int nsongs_deleted = 0;
                 bool current_song_deleted = false;
@@ -688,8 +723,8 @@ int main()
                     const struct inotify_event inotify_event = file_event.event;
                     const char* filename = file_event.file_name;
 
-                    const bool external_song_deletion = (inotify_event.mask == 64); 
-                    if(external_song_deletion) {
+                    // external song deletion
+                    if(inotify_event.mask == 64) {
                         // get the index of the deleted song from its filename
                         const int deleted_index = find_song_index(nsongs, song_information, filename);
                         
@@ -702,14 +737,14 @@ int main()
                                 current_song_deleted = true;
                         }
                     }
-                    const bool external_song_addition = (inotify_event.mask == 128) && (IsFileExtension(filename, ".mp3")) && (nsongs < NSONGS);
-                    if(external_song_addition){
+                    
+                    // external song addition
+                    else if((inotify_event.mask == 128) && (IsFileExtension(filename, ".mp3")) && (nsongs < NSONGS)) {
                         // the path of the added song 
                         char full_song_path[LEN * 3];
                         snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, filename);
 
                         // get new song's information
-                        strcpy(song_information[nsongs].relative_path, filename);
                         get_information(&song_information[nsongs], full_song_path);
                         
                         // update song count
@@ -718,11 +753,9 @@ int main()
                     }
                 }
 
-                // printf("%d songs deleted\n", nsongs_deleted);
-                // printf("%d songs deleted\n", nsongs_added);
-
                 // list is now sorted s.t. any deleted elements are at the front
-                qsort(song_information, nsongs, sizeof(SongInfo), by_title);
+                const bool album = is_album(nsongs, song_information);
+                qsort(song_information, nsongs, sizeof(SongInfo), (album ? by_track : by_title));
 
                 if(nsongs_deleted > 0) {
                     // shift remaining elements into null locations
@@ -739,6 +772,7 @@ int main()
                     current_song_index = (current_song_deleted || old_size == 0) ? 0 : find_song_index(nsongs, song_information, old_song);
                     set_current_song(playlist_path, cover_directory_path, &song_information[current_song_index], &music, settings);
                     PlayMusicStream(music);
+                    // start song paused
                     music_flags.play_music = false;
 
                     // reset song queue if in shuffle mode
@@ -776,12 +810,12 @@ int main()
                 external_playlist_watch.reading_events = true;
             }
             
-            // continue to read until threshold is met
+            // continue to read until rewind_threshold is met
             else if(external_playlist_watch.reading_events)
                 external_playlist_watch.nframes_reading++; 
 
-            // process external events after reading for 'frame_read_threshold' frames
-            if(external_playlist_watch.reading_events && (external_playlist_watch.nframes_reading >= frame_read_threshold)) {
+            // process external events after reading for 'frame_read_rewind_threshold' frames
+            if(external_playlist_watch.reading_events && (external_playlist_watch.nframes_reading >= frame_read_rewind_threshold)) {
                 int nplaylists_deleted = 0;
                 int nplaylists_added = 0;
                 bool current_playlist_deleted = false;
@@ -808,7 +842,8 @@ int main()
                                 current_playlist_deleted = true;
                                 // clear all song information of the current playlist
                                 music_flags = (MusicFlags){ false };
-                                unload_song_information(nsongs, song_information);
+                                for(int i = 0; i < nsongs; i++)
+                                    delete_song_information(&song_information[i]);
                             }
                         }
                     }
@@ -826,9 +861,6 @@ int main()
                         }
                     }
                 }
-
-                // printf("%d playlists added\n", nplaylists_added);
-                // printf("%d playlists deleted\n", nplaylists_deleted);
 
                 // sort elements alphabetically
                 // this means that any deleted elements are at the front since "" is first in ASCII
@@ -854,11 +886,11 @@ int main()
                 external_playlist_watch.reading_events = false;
             } 
         }
-
+       
         BeginDrawing(); 
             ClearBackground(RAYWHITE);
             const float CONTENT_HEIGHT = 30;
-            const float SCROLL_BAR_WIDTH = 13;
+            const float SCROLL_BAR_WIDTH = 14;
 
             if(application_state == PLAYLIST_WINDOW) {
                 // the bounds of the scrollpanel on the screen
@@ -900,7 +932,7 @@ int main()
             }
             else if(application_state == SONG_WINDOW) {
                 // toggling shuffle mode
-                if(IsKeyPressed(KEY_S)) {
+                if(IsKeyPressed(KEY_S) && (nsongs > 1)) {
                     music_flags.shuffle_play = !music_flags.shuffle_play;
                     
                     if(music_flags.shuffle_play) {
@@ -939,7 +971,7 @@ int main()
                     DrawText("Duration", (TOP_BAR_BOUNDS.width * 0.90f), y, font_size, display_color);
                 } 
                 // contains the buttons and sliders that change the flow and characteristics of the song played
-                if(current_song_index >= 0) {
+                {
                     // background color
                     DrawRectangleRec(BOTTOM_BAR_BOUNDS, RAYWHITE);
 
@@ -1025,19 +1057,21 @@ int main()
             else if(application_state == NO_SONGS_IN_PLAYLIST) {
                 char no_song_msg[LEN * 3];
                 snprintf(no_song_msg, (LEN * 3), "\"%s\" has no mp3s, add some", playlist_path);
-                DrawText(no_song_msg, (GetScreenWidth() / 2.0f) - (MeasureText(no_song_msg, 20) / 2.0f), (GetScreenHeight() / 2.0f), 25, BLACK); 
+                DrawText(no_song_msg, (GetScreenWidth() / 2.0f) - (MeasureText(no_song_msg, 20) / 2.0f), (GetScreenHeight() / 2.0f), 20, BLACK); 
             }
             else if(application_state == NO_PLAYLIST) {
                 char no_playlist_msg[LEN * 2];
-                snprintf(no_playlist_msg, (LEN * 2), "Your music directory %s has no playlists, create folders of mp3s to act as playlists here", playlist_directory);
+                snprintf(no_playlist_msg, (LEN * 2), "\"%s\" has no playlists, create folders of mp3s to act as playlists here", playlist_directory);
                 DrawText(no_playlist_msg, (GetScreenWidth() / 2.0f) - (MeasureText(no_playlist_msg, 20) / 2.0f), (GetScreenHeight() / 2.0f), 20, BLACK);
             }
             DrawFPS(0, GetScreenHeight() / 2);
         EndDrawing();
     }
     // dealloc
-    if(nsongs > 0)
-        unload_song_information(nsongs, song_information);
+    if(IsTextureReady(defualt_texture))
+        UnloadTexture(defualt_texture);
+    for(int i = 0; i < nsongs; i++)
+        delete_song_information(&song_information[i]);
     if(external_song_watch.wd)
         deinit_file_watch(&external_song_watch);
     if(external_playlist_watch.wd)
@@ -1051,6 +1085,3 @@ int main()
     CloseWindow();
     return 0;
 }
-
-// use pause and resume music stream
-// keep shuffle mode if going to empty playlist and then a full one

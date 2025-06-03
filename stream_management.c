@@ -1,4 +1,5 @@
 #include "headers/stream_management.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -18,7 +19,7 @@ int extract_cover_image(const char* song_path, const char* output_jpeg_path)
 {
     AVFormatContext* format_context = get_format_context(song_path);
     if(format_context == NULL) {
-        perror("extract_cover_image / get_format_context");
+        printf("extract_cover_image, could not get format context");
         avformat_close_input(&format_context);
         return -1;
     }
@@ -32,7 +33,7 @@ int extract_cover_image(const char* song_path, const char* output_jpeg_path)
             AVPacket pkt = stream->attached_pic;
             FILE *f = fopen(output_jpeg_path, "wb");
             if (!f) {
-                perror("extract_cover_image / fopen");
+                printf("extract_cover_image, could not open destination file to write image data");
                 avformat_close_input(&format_context);
                 return -1;
             }
@@ -43,7 +44,7 @@ int extract_cover_image(const char* song_path, const char* output_jpeg_path)
         }
     }
     // no picture extracted case
-    printf("no image extracted from \"%s\"\n", format_context->url);
+    printf("extract_cover_image, no image extracted from \"%s\"\n", format_context->url);
     avformat_close_input(&format_context);
     return -1;
 }
@@ -52,11 +53,11 @@ AVFormatContext* get_format_context(const char *path)
 {
     AVFormatContext *format_context = NULL;
     if (avformat_open_input(&format_context, path, NULL, NULL) < 0) {
-        perror("get_format_context / avformat_open_input");
+        printf("get_format_context, avformat_open_input");
         return NULL;
     }
     if (avformat_find_stream_info(format_context, NULL) < 0) {
-        perror("get_format_context / avformat_find_stream_info");
+        printf("get_format_context, avformat_find_stream_info");
         avformat_close_input(&format_context);
         return NULL;
     }

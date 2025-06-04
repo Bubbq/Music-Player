@@ -72,7 +72,7 @@ make clean
 ### Run the application
 
 ```bash
-./music_player
+./dotify
 ```
 
 ## Controls

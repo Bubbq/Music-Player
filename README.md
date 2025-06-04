@@ -55,7 +55,7 @@ cd dotify # move to the application directory
 make
 ```
 
-This will compile the application into an executable named `music_player`.
+This will compile the application into an executable named `dotify`.
 
 ### Clean up (optional)
 

@@ -953,5 +953,3 @@ int main()
     CloseWindow();
     return 0;
 }
-
-// seperate playlist

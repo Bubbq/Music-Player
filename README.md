@@ -37,7 +37,6 @@ Ensure the following directories exist for Dotify to work properly:
 
 ```
 ~/Music/                  # Contains your playlists (each subfolder is a playlist)
-~/.cache/song_covers/     # Where extracted album art will be stored
 ```
 
 ## Installation
@@ -106,7 +105,7 @@ make clean
 ### Album Art
 
 - Album art is automatically extracted from `.mp3` files
-- Stored in `~/.cache/song_covers`
+- Stored in `~/.cache/extracted_dotify_covers`
 - If no embedded cover art is found, a default image is used
 
 ---
@@ -132,7 +131,7 @@ ldconfig -p | grep avformat
 
 ## Customization
 
-You can modify the following constants in `music_player.c`:
+You can modify the following constants in `dotify.c`:
 
 - `LEN`: Maximum path length
 - `NSONGS`: Maximum number of songs per playlist

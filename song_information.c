@@ -29,7 +29,7 @@ int get_cover_path(int nchars, char dst[nchars], const char* song_title, const c
     } 
 }
 
-void get_information(SongInformation* song_information, const char* cover_directory, const char* mp3_path)
+void get_information(SongInformation* song_information, const char* cover_directory, const char* mp3_path, int cover_size)
 {
     // get the metadata from the audio path
     AVFormatContext* audio_format_context;
@@ -45,7 +45,6 @@ void get_information(SongInformation* song_information, const char* cover_direct
 
     // the path is relative to the playlist the mp3 is found in 
     strcpy(song_information->relative_path, GetFileName(mp3_path));
-    get_cover_path(LEN, song_information->cover_path, GetFileNameWithoutExt(song_information->relative_path), cover_directory);
 
     // song title
     if (get_metadata_parameter(audio_metadata, "title", LEN, song_information->title) < 0) 
@@ -72,8 +71,9 @@ void get_information(SongInformation* song_information, const char* cover_direct
     
     // textures are loaded when needed to save computation
     song_information->cover = (Texture2D){ 0 };
+    song_information->cover_size = cover_size;
+    get_cover_path(LEN, song_information->cover_path, GetFileNameWithoutExt(song_information->relative_path), cover_directory);
 
-    // update flag
     song_information->information_ready = true;
     avformat_close_input(&audio_format_context);
 }

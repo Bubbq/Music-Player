@@ -2,6 +2,7 @@
 #include "headers/raylib.h"
 #include "headers/file_watch.h"
 #include "headers/file_management.h"
+#include "headers/song_information.h"
 #include "headers/stream_management.h"
 
 #include <time.h>
@@ -41,19 +42,6 @@ typedef struct
     bool restart_song;
     bool update_song_position;
 } MusicFlags;
-
-typedef struct
-{
-    Texture2D cover;
-    char title[LEN]; 
-    char album[LEN]; 
-    char artist[LEN]; 
-    char relative_path[LEN]; 
-    float track;
-    float duration;
-    float access_time;
-    bool information_ready; 
-} SongInfo;
 
 typedef struct
 {
@@ -240,29 +228,11 @@ void music_settings(Rectangle container, MusicSettings* settings, Music* music)
         SetMusicPan((*music), 1 - settings->pan);
 }
 
-// given a songname, write the appropraite cover path to dst
-int get_cover_path(int nchars, char dst[nchars], const char* song_title, const char* cover_directory_path)
+// returns the texture of a song either by finding the jpg in the computer or extracting the image itself  
+Texture2D get_song_cover(const char* song_path, const char* cover_path, int image_size)
 {
-    const int min_len = strlen(cover_directory_path) + strlen(song_title) + strlen(".jpg");
-    if(nchars < min_len) {
-        printf("get_cover_path, nchars of dst (%d) is smaller than the min length (%d)\n", nchars, min_len);
-        memset(dst, 0, nchars);
-        return -1;
-    } 
-    else {
-        snprintf(dst, nchars, "%s/%s.jpg", cover_directory_path, song_title);
-        return 0;
-    } 
-}
-
-Texture2D get_song_cover(const char* song_path, const char* cover_directory_path, int image_size)
-{
-    // getting the cover path
-    char cover_path[LEN * 2];
-    if(get_cover_path((LEN * 2), cover_path, GetFileNameWithoutExt(song_path), cover_directory_path) < 0)
-        return (Texture2D){ 0 };
-    // extract the cover image if the file doesnt already exist
-    else if(!FileExists(cover_path) && (extract_cover_image(song_path, cover_path) < 0))
+    // issue with extracting jpg from mp3
+    if(!FileExists(cover_path) && (extract_cover_image(song_path, cover_path) < 0))
         return (Texture2D){ 0 };
     else {
         Image image = LoadImage(cover_path);
@@ -289,17 +259,6 @@ Texture2D get_default_song_cover()
         defualt_texture = LoadTextureFromImage(default_image);
     }
     return defualt_texture;
-}
-
-// returns the time in seconds since last access of a file
-float file_access_time(const char* file)
-{
-    const time_t right_now = time(NULL);
-    struct stat st;
-    if(stat(file, &st) == 0) 
-        return difftime(right_now, st.st_atim.tv_sec);
-    else
-        return -1;
 }
 
 // convert time in seconds since file has been altered to string form
@@ -331,64 +290,28 @@ void seconds_to_last_accessed(long int s, int nchars, char dst[nchars])
         snprintf(dst, nchars, "now");
 }
 
-float microseconds_to_seconds(float microseconds)
-{
-    return (microseconds * 0.000001);
-}
-
-// get all the information for a song
-void get_information(SongInfo* information, const char* full_song_path)
-{
-    // get the metadata from the audio/video path
-    AVFormatContext* format_context;
-    if((format_context = get_format_context(full_song_path)) == NULL) 
-        return;
-
-    AVDictionary* metadata = format_context->metadata;
-
-    const char* DEFAULT = "...";
-
-    strcpy(information->relative_path, GetFileName(full_song_path));
-
-    // basic song information
-    if(get_metadata_parameter(metadata, "artist", LEN, information->artist) < 0) strcpy(information->artist, DEFAULT);
-    if(get_metadata_parameter(metadata, "title", LEN, information->title) < 0) strcpy(information->title, information->relative_path);
-    if(get_metadata_parameter(metadata, "album", LEN, information->album) < 0) strcpy(information->album, DEFAULT);
-    
-    char track[LEN];
-    if(get_metadata_parameter(metadata, "track", LEN, track) <  0) 
-        information->track = 999;
-    else
-        information->track = atof(track);
-
-    information->duration = microseconds_to_seconds(format_context->duration);
-    information->access_time = file_access_time(full_song_path);
-    information->information_ready = true;
-
-    avformat_close_input(&format_context);
-}
-
 // comparators for qsort
-int by_playlist(const void* a, const void* b)
-{
-    return strcmp((char*)a, (char*)b);
+int by_playlist(const void* a, const void* b) {
+    const char* sa = (const char*)a;
+    const char* sb = (const char*)b;
+    return strcmp(sa, sb);
 }
 
 int by_title(const void* a, const void* b)
 {
-    SongInfo* info_a = (SongInfo*)a;
-    SongInfo* info_b = (SongInfo*)b;
+    SongInformation* info_a = (SongInformation*)a;
+    SongInformation* info_b = (SongInformation*)b;
     return strcmp(info_a->title, info_b->title);
 }
 
 int by_track(const void* a, const void* b)
 {
-    SongInfo* info_a = (SongInfo*)a;
-    SongInfo* info_b = (SongInfo*)b;
+    SongInformation* info_a = (SongInformation*)a;
+    SongInformation* info_b = (SongInformation*)b;
     return info_a->track > info_b->track;
 }
 
-void set_current_song(const char* playlist_path, const char* cover_directory_path, SongInfo* song_information, Music* music, MusicSettings settings)
+void set_current_song(const char* playlist_path, const char* cover_directory_path, SongInformation* song_information, Music* music, MusicSettings settings)
 {
     char full_song_path[LEN * 3];
     snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, song_information->relative_path);
@@ -397,7 +320,7 @@ void set_current_song(const char* playlist_path, const char* cover_directory_pat
         const bool loop = music->looping;
 
         // get new cover
-        song_information->cover = get_song_cover(full_song_path, cover_directory_path, IMG_SIZE);
+        song_information->cover = get_song_cover(full_song_path, song_information->cover_path, IMG_SIZE);
         
         // load new music stream
         change_music_stream(music, full_song_path);
@@ -412,16 +335,18 @@ void set_current_song(const char* playlist_path, const char* cover_directory_pat
 }
 
 // a playlist is an album whenever there are no differences in albums
-bool is_album(int nsongs, SongInfo song_information[nsongs])
+bool is_album(int nsongs, SongInformation song_information[nsongs])
 {
-    char* album = song_information[0].album;
-    for(int i = 0; i < nsongs; i++)
-        if(strcmp(album, song_information[i].album) != 0 && (strlen(song_information[i].album) > 0))
+    const char* ref_album = song_information[0].album;
+    int i = 0;
+    for (const char* current = ref_album; i < nsongs; i++, current = song_information[i].album) {
+        if(strcmp(ref_album, current) != 0)
             return false;
+    }
     return true;
 }
 
-int load_playlist_information(int max_nsongs, SongInfo song_information[max_nsongs], const char* playlist_path)
+int load_playlist_information(int max_nsongs, SongInformation song_information[max_nsongs], const char* playlist_path, const char* cover_directory_path)
 {
     // store all files in the playlist path
     char relative_paths[NSONGS][LEN] = { 0 };
@@ -434,25 +359,18 @@ int load_playlist_information(int max_nsongs, SongInfo song_information[max_nson
     char buffer[LEN * 3];
     for(int i = 0; i < nsongs; i++) {
         snprintf(buffer, (LEN * 3), "%s/%s", playlist_path, relative_paths[i]);
-        get_information(&song_information[i], buffer);
+        get_information(&song_information[i], cover_directory_path, buffer);
     }    
 
     // sort songs in alphabetical order
     const bool album = is_album(nsongs, song_information);
-    qsort(song_information, nsongs, sizeof(SongInfo), (album ? by_track : by_title));
+    qsort(song_information, nsongs, sizeof(SongInformation), (album ? by_track : by_title));
 
     return nsongs;
 }
 
-void delete_song_information(SongInfo* song_information)
-{
-    if(IsTextureReady(song_information->cover))
-        UnloadTexture(song_information->cover);
-    memset(song_information, 0, sizeof((*song_information)));
-}
-
 // returns the index of the song with a matching relative path
-int find_song_index(int nsongs, SongInfo song_information[nsongs], const char* relative_path)
+int find_song_index(int nsongs, SongInformation song_information[nsongs], const char* relative_path)
 {
     for(int s = 0; s < nsongs; s++) 
         if(strcmp(song_information[s].relative_path, relative_path) == 0)
@@ -522,7 +440,7 @@ int main()
     int song_history = 0; 
 
     // relavent information of every song in the current playlist
-    SongInfo song_information[NSONGS] = { 0 };
+    SongInformation song_information[NSONGS] = { 0 };
 
     // the current number of songs and playlists in the application
     int nsongs;
@@ -561,13 +479,8 @@ int main()
     FileWatch external_playlist_watch;
     
     // write the relative path of all folders in the playlist directory to 'playlists'
-    if((nplaylists = get_files_from_folder(LEN, NPLAYLIST, playlists, playlist_directory, DT_DIR)) > 0) {
-        application_state = PLAYLIST_WINDOW;
-        // sort playlists alphabetically
-        qsort(playlists, nplaylists, LEN, by_playlist);
-    }
-    else
-        application_state = NO_PLAYLIST;
+    nplaylists = get_files_from_folder(LEN, NPLAYLIST, playlists, playlist_directory, DT_DIR);
+    application_state = (nplaylists > 0) ? PLAYLIST_WINDOW : NO_PLAYLIST;
 
     // start watching for external events regarding playlists
     init_file_watch(&external_playlist_watch, playlist_directory, SIGNALS);
@@ -602,7 +515,7 @@ int main()
             snprintf(playlist_path, (LEN * 2), "%s/%s", playlist_directory, playlists[current_playlist_index]);
 
             // load information of the new playlist
-            if((nsongs = load_playlist_information(NSONGS, song_information, playlist_path)) > 0) {
+            if((nsongs = load_playlist_information(NSONGS, song_information, playlist_path, cover_directory_path)) > 0) {
                 application_state = SONG_WINDOW;
                 
                 // retain previous loop status
@@ -761,7 +674,7 @@ int main()
                         snprintf(full_song_path, (LEN * 3), "%s/%s", playlist_path, filename);
 
                         // get new song's information
-                        get_information(&song_information[nsongs], full_song_path);
+                        get_information(&song_information[nsongs], cover_directory_path, full_song_path);
                         
                         // update song count
                         nsongs_added++;
@@ -770,13 +683,19 @@ int main()
                 }
 
                 // list is now sorted s.t. any deleted elements are at the front
-                const bool album = is_album(nsongs, song_information);
-                qsort(song_information, nsongs, sizeof(SongInfo), (album ? by_track : by_title));
+                qsort(song_information, nsongs, sizeof(SongInformation), by_title);
 
+                // sort by track number if the playlist is an album
+                SongInformation* valid_elements = song_information + nsongs_deleted;
+                int valid_count = nsongs - nsongs_deleted;
+                const bool album = is_album(valid_count, valid_elements);
+                if(album) 
+                    qsort(valid_elements, valid_count, sizeof(SongInformation), by_track);
+                
                 if(nsongs_deleted > 0) {
                     // shift remaining elements into null locations
                     if(nsongs_deleted < nsongs)
-                        shift_array(nsongs, song_information, 0, nsongs_deleted, sizeof(SongInfo));
+                        shift_array(nsongs, song_information, 0, nsongs_deleted, sizeof(SongInformation));
                     
                     // adjust size
                     nsongs -= nsongs_deleted;
@@ -1103,3 +1022,4 @@ int main()
     CloseWindow();
     return 0;
 }
+// split music management

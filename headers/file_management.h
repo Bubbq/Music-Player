@@ -10,5 +10,5 @@ int filter_library(int maxlen, int nsongs, char library[nsongs][maxlen], const c
 // makes the directory specified in 'directory_path'
 void make_directory(const char* directory_path);
 
-// converts a filepath into a linux formatted file stored into 'dst', returns dst size
-int linux_format(int maxlen, char dst[maxlen], const char* path);
+// returns the time in seconds since last access of a file
+float file_access_time(const char* file);

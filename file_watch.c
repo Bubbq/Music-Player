@@ -32,7 +32,7 @@ void deinit_file_watch(FileWatch* file_watch)
     close(file_watch->fd);
 }
 
-int watch_events(int maxevents, int starting_point, FileEvent events[maxevents], int fd) 
+int read_events(int maxevents, int starting_point, FileEvent events[maxevents], int fd) 
 {
     int events_read = 0;
 
@@ -68,6 +68,29 @@ int watch_events(int maxevents, int starting_point, FileEvent events[maxevents],
     }
 
     return events_read;
+}
+
+bool process_external_events(const int maxevents, const int frames_to_read, FileWatch* file_watch)
+{
+    // starting position is not explicity 0 due to the fact that when reading a large amount of events, not all are read in one frame
+    // this is highly dependent on the FPS of the application where more FPS -> higher chance of n events splitting
+    const int events_read = read_events(maxevents, file_watch->nevents, file_watch->events, file_watch->fd);
+
+    // append/init the number of events read
+    file_watch->nevents += events_read;
+
+    // when reading a new event
+    if((file_watch->reading_events == false) && (events_read > 0)) {
+        file_watch->nframes_reading = 0;
+        file_watch->reading_events = true;
+    }
+
+    // continue to read until rewind_threshold is met
+    else if(file_watch->reading_events)
+        file_watch->nframes_reading++; 
+
+    // thus, the application process events after reading events for a certain amount of frames
+    return (file_watch->reading_events && (file_watch->nframes_reading >= frames_to_read));
 }
 
 void print_inotify_event(const struct inotify_event* event, const char* file_name) 

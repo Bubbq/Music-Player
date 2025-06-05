@@ -295,7 +295,6 @@ int find_song_index(int nsongs, SongInformation song_information[nsongs], const 
     for(int s = 0; s < nsongs; s++) 
         if(strcmp(song_information[s].relative_path, relative_path) == 0)
             return s;
-    printf("find_index, %s was not found\n", relative_path);
     return -1;
 }
 
@@ -305,7 +304,6 @@ int find_playlist_index(const int nplaylists, char** playlists, const char* targ
         if(strcmp(GetFileName(playlists[p]), target) == 0)
             return p;
     }
-    printf("find_playlist_index, %s was not found\n", target);
     return -1;
 }
 
@@ -544,25 +542,7 @@ int main()
 
         // handling external song events (deleting, adding, and/or renaming songs in your file explorer while the application is running)
         if((application_state == SONG_WINDOW) || (application_state == NO_SONGS_IN_PLAYLIST)) {
-            // starting position is not explicity 0 due to the fact that when reading a large amount of events, not all are read in one frame
-            // this is highly dependent on the FPS of the application where more FPS -> higher chance of n events splitting
-            const int events_read = watch_events(NSONGS, external_song_watch.nevents, external_song_watch.events, external_song_watch.fd);
-
-            // append/init the number of events read
-            external_song_watch.nevents += events_read;
-
-            // when reading a new event
-            if((external_song_watch.reading_events == false) && (events_read > 0)) {
-                external_song_watch.nframes_reading = 0;
-                external_song_watch.reading_events = true;
-            }
-
-            // continue to read until rewind_threshold is met
-            else if(external_song_watch.reading_events)
-                external_song_watch.nframes_reading++; 
-                
-            // after reading events for n frames, now process file events
-            if((external_song_watch.reading_events) && (external_song_watch.nframes_reading >= frame_read_threshold)) {
+            if(process_external_events(MAX_EVENTS, frame_read_threshold, &external_song_watch)) {
                 int nsongs_added = 0;
                 int nsongs_deleted = 0;
                 bool current_song_deleted = false;
@@ -657,24 +637,7 @@ int main()
         
         // handling external playlist events (deleting, adding, and/or renaming playlists in your file explorer while the application is running)
         {
-            // read n events into FileWatch object
-            const int events_read = watch_events(NPLAYLIST, external_playlist_watch.nevents, external_playlist_watch.events, external_playlist_watch.fd);
-            
-            // append/init the number of events read
-            external_playlist_watch.nevents += events_read;
-
-            // when reading a new event
-            if((external_playlist_watch.reading_events == false) && (events_read > 0)) {
-                external_playlist_watch.nframes_reading = 0;
-                external_playlist_watch.reading_events = true;
-            }
-            
-            // continue to read until rewind_threshold is met
-            else if(external_playlist_watch.reading_events)
-                external_playlist_watch.nframes_reading++; 
-
-            // process external events after reading for 'frame_read_threshold' frames
-            if(external_playlist_watch.reading_events && (external_playlist_watch.nframes_reading >= frame_read_threshold)) {
+            if(process_external_events(MAX_EVENTS, frame_read_threshold, &external_playlist_watch)) {
                 bool current_playlist_deleted = false;
                 
                 char old_playlist[LEN];
@@ -774,9 +737,11 @@ int main()
                         create_song_queue(nsongs, current_song_index, shuffled_song_queue);
                     }
                 }
+
                 // toggling looping
                 if(IsKeyPressed(KEY_L)) 
                     music.looping = !music.looping;
+
                 // restart song 
                 if(IsKeyPressed(KEY_R))
                     music_flags.restart_song = true;
@@ -797,7 +762,7 @@ int main()
                     const int font_size = 15;
                     const Color display_color = BLACK;
                     const float y = TOP_BAR_BOUNDS.y + (TOP_BAR_BOUNDS.height / 2.0f);
-                    DrawText("#", 13, y, font_size, display_color);
+                    DrawText("#", 11, y, font_size, display_color);
                     DrawText("Title", 30, y, font_size, display_color);
                     DrawText("Artist", (TOP_BAR_BOUNDS.width * 0.30f), y, font_size, display_color);
                     DrawText("Album", (TOP_BAR_BOUNDS.width * 0.50f), y, font_size, display_color);

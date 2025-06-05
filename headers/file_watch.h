@@ -2,7 +2,7 @@
 #include <sys/inotify.h>
 
 #define LEN 256
-#define MAX_EVENTS 100
+#define MAX_EVENTS 256
 
 typedef struct
 {

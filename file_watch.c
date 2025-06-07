@@ -9,7 +9,6 @@
 
 // the size of the inotify event does not include the 'name' parameter
 #define EVENT_SIZE sizeof(struct inotify_event)
-#define BUF_LEN (MAX_EVENTS * (EVENT_SIZE + LEN))
 
 void init_file_watch(FileWatch* file_watch, const char* filepath, const uint32_t signal)
 {

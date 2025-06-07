@@ -77,12 +77,10 @@ void create_song_queue(int nsongs, int current_song_index, int queue[nsongs])
         printf("create_song_queue, %d is larger than the maximum size (%d)\n", current_song_index, (nsongs - 1));
         return;
     }
-
     else if(current_song_index < 0) {
         printf("create_song_queue, %d is smaller than the minimum length (0)", current_song_index);
         return;
     }
-
     else {
         for(int i = 0; i < nsongs; i++)
             queue[i] = i;
@@ -98,7 +96,7 @@ void init_app()
     srand(time(NULL));
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
-    InitWindow(750,750, "Dotify");
+    InitWindow(750,750, "dotify");
     InitAudioDevice();
 }
 
@@ -127,7 +125,7 @@ void playback_buttons(Rectangle container, MusicFlags* flags, Timer* skip_timer,
     // rewind button
     const float rewind_threshold = 3.0f; // the amount of time that needs to be played to restart rather than rewind
     const Rectangle rewind_bounds = (Rectangle){ (GetScreenWidth() / 2.00) - (size * 2.0f), y, size, size };
-    if((GuiButton(rewind_bounds, "<") || IsKeyPressed(KEY_A) || IsKeyPressed(KEY_LEFT)) && is_timer_done(*rewind_timer)) {
+    if((GuiButton(rewind_bounds, "<") || IsKeyPressed(KEY_A)) && is_timer_done(*rewind_timer)) {
         start_timer(rewind_timer, action_interval);
         
         if(seconds_played >= rewind_threshold)
@@ -144,7 +142,7 @@ void playback_buttons(Rectangle container, MusicFlags* flags, Timer* skip_timer,
 
     // skip button
     const Rectangle skip_bounds = (Rectangle){ (GetScreenWidth() / 2.0f) + size, y, size, size };
-    if((GuiButton(skip_bounds, ">") || IsKeyPressed(KEY_D) || IsKeyPressed(KEY_RIGHT)) && is_timer_done(*skip_timer)) {
+    if((GuiButton(skip_bounds, ">") || IsKeyPressed(KEY_D)) && is_timer_done(*skip_timer)) {
         start_timer(skip_timer, action_interval);
         flags->play_music = flags->skip_song = true;
     }
@@ -285,8 +283,9 @@ int load_playlist_information(int max_nsongs, SongInformation song_information[m
     const bool is_playlist_an_album = is_album(song_paths.count, song_information);
     qsort(song_information, song_paths.count, sizeof(SongInformation), (is_playlist_an_album ? by_track : by_title));
     
+    const int nsongs = song_paths.count;
     UnloadDirectoryFiles(song_paths);
-    return song_paths.count;
+    return nsongs;
 }
 
 // returns the index of the song with a matching relative path
@@ -636,53 +635,51 @@ int main()
         }
         
         // handling external playlist events (deleting, adding, and/or renaming playlists in your file explorer while the application is running)
-        {
-            if(process_external_events(MAX_EVENTS, frame_read_threshold, &external_playlist_watch)) {
-                bool current_playlist_deleted = false;
-                
-                char old_playlist[LEN];
-                strcpy(old_playlist, current_playlist_index >= 0 ? GetFileName(playlists.paths[current_playlist_index]) : "");
+        if(process_external_events(MAX_EVENTS, frame_read_threshold, &external_playlist_watch)) {
+            bool current_playlist_deleted = false;
+            
+            char old_playlist[LEN];
+            strcpy(old_playlist, current_playlist_index >= 0 ? GetFileName(playlists.paths[current_playlist_index]) : "");
 
-                for(int e = 0; e < external_playlist_watch.nevents; e++) {
-                    const FileEvent file_event = external_playlist_watch.events[e];
-                    const struct inotify_event inotify_event = file_event.event; 
-                    const char* filename = file_event.file_name; 
-                    // print_inotify_event(&inotify_event,  filename);
+            for(int e = 0; e < external_playlist_watch.nevents; e++) {
+                const FileEvent file_event = external_playlist_watch.events[e];
+                const struct inotify_event inotify_event = file_event.event; 
+                const char* filename = file_event.file_name; 
+                // print_inotify_event(&inotify_event,  filename);
 
-                    // deletion
-                    if(inotify_event.mask == 1073741888) {
-                        const int deleted_index = find_playlist_index(playlists.count, playlists.paths, filename);
-                        
-                        // clear all song information of the current playlist if its deleted externally
-                        if(deleted_index == current_playlist_index) {
-                            current_playlist_deleted = true;
-                            music_flags = (MusicFlags){ false };
-                            for(int i = 0; i < nsongs; i++)
-                                delete_song_information(&song_information[i]);
-                        } 
-                    }
+                // deletion
+                if(inotify_event.mask == 1073741888) {
+                    const int deleted_index = find_playlist_index(playlists.count, playlists.paths, filename);
+                    
+                    // clear all song information of the current playlist if its deleted externally
+                    if(deleted_index == current_playlist_index) {
+                        current_playlist_deleted = true;
+                        music_flags = (MusicFlags){ false };
+                        for(int i = 0; i < nsongs; i++)
+                            delete_song_information(&song_information[i]);
+                    } 
                 }
+            }
 
-                // update array of playlist paths 
-                UnloadDirectoryFiles(playlists);
-                playlists = LoadDirectoryFiles(playlist_directory);
-                
-                // sort paths alphabetically
-                qsort(playlists.paths, playlists.count, sizeof(char*), alphabetical_order);
+            // update array of playlist paths 
+            UnloadDirectoryFiles(playlists);
+            playlists = LoadDirectoryFiles(playlist_directory);
+            
+            // sort paths alphabetically
+            qsort(playlists.paths, playlists.count, sizeof(char*), alphabetical_order);
 
-                // handling application state upon external playlist update
-                const bool go_to_playlist_view = ((application_state == PLAYLIST_WINDOW)|| (application_state == NO_PLAYLIST) || current_playlist_deleted);
-                if(go_to_playlist_view)
-                    application_state = (playlists.count == 0) ? NO_PLAYLIST : PLAYLIST_WINDOW;
-                
-                // remain in current playlist if possible 
-                current_playlist_index = find_playlist_index(playlists.count, playlists.paths, old_playlist);
-                
-                // reset reading params in FileWatch object
-                external_playlist_watch.nevents = 0;
-                external_playlist_watch.reading_events = false;
-            } 
-        }
+            // handling application state upon external playlist update
+            const bool go_to_playlist_view = ((application_state == PLAYLIST_WINDOW)|| (application_state == NO_PLAYLIST) || current_playlist_deleted);
+            if(go_to_playlist_view)
+                application_state = (playlists.count == 0) ? NO_PLAYLIST : PLAYLIST_WINDOW;
+            
+            // remain in current playlist if possible 
+            current_playlist_index = find_playlist_index(playlists.count, playlists.paths, old_playlist);
+            
+            // reset reading params in FileWatch object
+            external_playlist_watch.nevents = 0;
+            external_playlist_watch.reading_events = false;
+        } 
 
         BeginDrawing(); 
             ClearBackground(RAYWHITE);
@@ -691,10 +688,10 @@ int main()
 
             if(application_state == PLAYLIST_WINDOW) {
                 // the bounds of the scrollpanel on the screen
-                const Rectangle playlistPanel = (Rectangle){ -1, -1, GetScreenWidth(), GetScreenHeight() + SCROLL_BAR_WIDTH };
+                const Rectangle playlistPanel = (Rectangle){ -1, -1, (GetScreenWidth() + 2), GetScreenHeight() + SCROLL_BAR_WIDTH };
                 
                 // the area that displaying the information takes
-                const Rectangle playlistContent = (Rectangle){ 0, 0, GetScreenWidth(), (playlists.count * CONTENT_HEIGHT) };
+                const Rectangle playlistContent = (Rectangle){ -1, -1, (GetScreenWidth() + 2), (playlists.count * CONTENT_HEIGHT) };
                 
                 const bool vertical_scrollbar_visible = (playlistContent.height > GetScreenHeight());
 
@@ -749,9 +746,9 @@ int main()
                 const Rectangle BOTTOM_BAR_BOUNDS = (Rectangle) { 0, GetScreenHeight() - 100, GetScreenWidth(), 100 };
                 
                 // the bounds of the scrollpanel on the screen
-                const Rectangle songPanel = (Rectangle){ -1, -1, GetScreenWidth(), GetScreenHeight() - BOTTOM_BAR_BOUNDS.height + SCROLL_BAR_WIDTH };
+                const Rectangle songPanel = (Rectangle){ -1, -1, (GetScreenWidth() + 2), GetScreenHeight() - BOTTOM_BAR_BOUNDS.height + SCROLL_BAR_WIDTH };
                 // the area that displaying the information takes
-                const Rectangle songContent = (Rectangle){ 0, CONTENT_HEIGHT, GetScreenWidth(), ((nsongs + 1) * CONTENT_HEIGHT) };
+                const Rectangle songContent = (Rectangle){ -1, CONTENT_HEIGHT, GetScreenWidth(), ((nsongs + 1) * CONTENT_HEIGHT) };
                 const bool vertical_scroll_visible = songContent.height > (GetScreenHeight() - BOTTOM_BAR_BOUNDS.height);
                 
                 GuiScrollPanel(songPanel, NULL, songContent, &panelScroll, &panelView);
@@ -853,7 +850,42 @@ int main()
                         }
                     }
                 }
+                // controls for skipping music stream 
+                {
+                    const int skip_amount = 10;
+
+                    // go 10 seconds ahead
+                    if(IsKeyPressed(KEY_RIGHT)) {
+                        // find where you are right now
+                        int current = GetMusicTimePlayed(music);
+
+                        // s1: there is enough time to skip
+                        if((current + skip_amount) < GetMusicTimeLength(music)) {
+                            settings.percent_played = ((current + skip_amount) / GetMusicTimeLength(music));
+                            music_flags.update_song_position = true;
+                        }
+                        // skip to the next song otherwise
+                        else 
+                            music_flags.play_music = music_flags.skip_song = true;
+                    }
+
+                    // go 10 seconds back
+                    else if(IsKeyPressed(KEY_LEFT)) {
+                        // find where you are right now
+                        int current = GetMusicTimePlayed(music);
+
+                        // there is enough time to go back
+                        if((current - skip_amount) > 0) {
+                            settings.percent_played = ((current - skip_amount) / GetMusicTimeLength(music));
+                            music_flags.update_song_position = true;
+                        }
+                        // skip to the next song otherwise
+                        else 
+                            music_flags.play_music = music_flags.restart_song = true;
+                    }
+                } 
             }
+
             else if(application_state == NO_SONGS_IN_PLAYLIST) {
                 char no_song_msg[LEN * 3];
                 snprintf(no_song_msg, (LEN * 3), "\"%s\" has no mp3s, add some", playlists.paths[current_playlist_index]);

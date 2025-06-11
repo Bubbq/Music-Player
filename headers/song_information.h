@@ -18,7 +18,7 @@ typedef struct
     char artist[LEN]; 
     
     // basic file information
-    float access_time;
+    float modified_time;
     char relative_path[LEN]; 
 
     // flag detailing wether the information above has been loaded or not

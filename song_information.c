@@ -67,7 +67,7 @@ void get_information(SongInformation* song_information, const char* cover_direct
 
     // the duration param of the format context object is in microseconds
     song_information->duration = microseconds_to_seconds(audio_format_context->duration);
-    song_information->access_time = file_access_time(mp3_path);
+    song_information->modified_time = file_modification_time(mp3_path);
     
     // textures are loaded when needed to save computation
     song_information->cover = (Texture2D){ 0 };

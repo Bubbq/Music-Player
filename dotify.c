@@ -4,7 +4,6 @@
 #include "headers/file_management.h"
 #include "headers/music_management.h"
 #include "headers/stream_management.h"
-#include "raylib/src/raylib.h"
 
 #include <time.h>
 #include <stdio.h>
@@ -216,7 +215,7 @@ Texture2D get_default_song_cover()
 }
 
 // convert time in seconds since file has been altered to string form
-void seconds_to_last_accessed(long int s, int nchars, char dst[nchars])
+void seconds_to_last_modified(long int s, int nchars, char dst[nchars])
 {
     int days = s / 86400;
     int years = days / 365;
@@ -411,10 +410,8 @@ int main()
     // initalizing the application
     init_app();
 
-    // inital position of scrollbar
-    Vector2 panelScroll = { 99, 0 };
-
     // no idea what this is tbh, raylib example isnt very specfic
+    Vector2 panelScroll = { 99, 0 };
     Rectangle panelView = { 10, 10 };
 
     // default song cover used when mp3s metadata does not have an image embedded
@@ -542,7 +539,6 @@ int main()
         // handling external song events (deleting, adding, and/or renaming songs in your file explorer while the application is running)
         if((application_state == SONG_WINDOW) || (application_state == NO_SONGS_IN_PLAYLIST)) {
             if(process_external_events(MAX_EVENTS, frame_read_threshold, &external_song_watch)) {
-                int nsongs_added = 0;
                 int nsongs_deleted = 0;
                 bool current_song_deleted = false;
                 const int old_size = nsongs;
@@ -561,11 +557,10 @@ int main()
                         
                         // clear information
                         if(deleted_index >= 0) {
-                            delete_song_information(&song_information[deleted_index]);
-                            nsongs_deleted++;
-
                             if(deleted_index == current_song_index) 
                                 current_song_deleted = true;
+                            delete_song_information(&song_information[deleted_index]);
+                            nsongs_deleted++;
                         }
                     }
                     
@@ -579,7 +574,6 @@ int main()
                         get_information(&song_information[nsongs], cover_directory_path, full_song_path, IMG_SIZE);
                         
                         // update song count
-                        nsongs_added++;
                         nsongs++;
                     }
                 }
@@ -653,6 +647,7 @@ int main()
                     
                     // clear all song information of the current playlist if its deleted externally
                     if(deleted_index == current_playlist_index) {
+                        current_song_index = -1;
                         current_playlist_deleted = true;
                         music_flags = (MusicFlags){ false };
                         for(int i = 0; i < nsongs; i++)
@@ -837,14 +832,14 @@ int main()
                                 snprintf(index, 4, "%3d", (s + 1));
                                 char duration[LEN];
                                 seconds_to_timestamp(song_information[s].duration, LEN, duration);
-                                char last_accessed[LEN];
-                                seconds_to_last_accessed(song_information[s].access_time, LEN, last_accessed);
+                                char last_modified[LEN];
+                                seconds_to_last_modified(song_information[s].modified_time, LEN, last_modified);
                                 
                                 DrawText(index, 5, y, font_size, display_color);
                                 DrawText(song_information[s].title, 30, y, font_size, display_color);        
                                 DrawText(song_information[s].artist, (content_rect.width * 0.30f), y, font_size, display_color);
                                 DrawText(song_information[s].album, (content_rect.width * 0.50f), y, font_size, display_color);
-                                DrawText(last_accessed, (content_rect.width * 0.70f), y, font_size, display_color);
+                                DrawText(last_modified, (content_rect.width * 0.70f), y, font_size, display_color);
                                 DrawText(duration, (content_rect.width * 0.90f), y, font_size, display_color);
                             }
                         }
@@ -885,10 +880,9 @@ int main()
                     }
                 } 
             }
-
             else if(application_state == NO_SONGS_IN_PLAYLIST) {
-                char no_song_msg[LEN * 3];
-                snprintf(no_song_msg, (LEN * 3), "\"%s\" has no mp3s, add some", playlists.paths[current_playlist_index]);
+                char no_song_msg[LEN * 2];
+                snprintf(no_song_msg, (LEN * 2), "\"%s\" has no mp3s, add some", playlists.paths[current_playlist_index]);
                 DrawText(no_song_msg, (GetScreenWidth() / 2.0f) - (MeasureText(no_song_msg, 20) / 2.0f), (GetScreenHeight() / 2.0f), 20, BLACK); 
             }
             else if(application_state == NO_PLAYLIST) {
@@ -919,3 +913,4 @@ int main()
     CloseWindow();
     return 0;
 }
+// change structre of update code section
